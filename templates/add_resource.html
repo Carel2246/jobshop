@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Manage Resources</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script>
+        function editResource(id) {
+            if (typeof id === 'undefined') {
+                console.error('Error: id is undefined');
+                return;
+            }
+            const row = document.querySelector(`tr[data-id="${id}"]`);
+            if (!row) {
+                console.error(`No row found for id: ${id}`);
+                return;
+            }
+            const updateUrl = '/update_resource/' + id;
+            row.innerHTML = `
+                <td><input type="text" name="name" value="${row.cells[0].textContent}" form="edit_${id}"></td>
+                <td><select name="type" form="edit_${id}">
+                    <option value="H" ${row.cells[1].textContent === 'H' ? 'selected' : ''}>H</option>
+                    <option value="M" ${row.cells[1].textContent === 'M' ? 'selected' : ''}>M</option>
+                </select></td>
+                <td>
+                    <form id="edit_${id}" action="${updateUrl}" method="POST">
+                        <button type="submit">Save</button>
+                    </form>
+                    <button onclick="location.reload()">Cancel</button>
+                </td>
+            `;
+        }
+        function deleteResource(id) {
+            if (confirm("Are you sure you want to delete resource " + id + "?")) {
+                fetch('/delete_resource/' + id, { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => { if (data.success) location.reload(); });
+            }
+        }
+    </script>
+</head>
+<body>
+    <h1>Manage Resources</h1>
+    <h2>Import Resources from Excel</h2>
+    <form method="POST" enctype="multipart/form-data">
+        <label>Upload Excel File:</label><input type="file" name="excel_file" accept=".xls,.xlsx"><br>
+        <p>Required columns: Name, Type (H or M)</p>
+        <button type="submit">Import Resources</button>
+    </form>
+    <h2>Add Resource Manually</h2>
+    <form method="POST">
+        <label>Name:</label><input type="text" name="name" required><br>
+        <label>Type:</label>
+        <select name="type" required>
+            <option value="H">Human (H)</option>
+            <option value="M">Machine (M)</option>
+        </select><br>
+        <button type="submit">Add Resource</button>
+    </form>
+    <h2>Current Resources</h2>
+    <table>
+        <tr><th>Name</th><th>Type</th><th>Actions</th></tr>
+        {% for res in resources %}
+            <tr data-id="{{ res.id }}">
+                <td>{{ res.name }}</td>
+                <td>{{ res.type }}</td>
+                <td>
+                    <button onclick="editResource('{{ res.id }}')">Edit</button>
+                    <button onclick="deleteResource('{{ res.id }}')">Delete</button>
+                </td>
+            </tr>
+        {% endfor %}
+    </table>
+    <a href="{{ url_for('index') }}">Back to Home</a>
+</body>
+</html>

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Manage Jobs</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script>
+        function editJob(jobNumber) {
+            const row = document.querySelector(`tr[data-id="${jobNumber}"]`);
+            const updateUrl = '/update_job/' + jobNumber;
+            row.innerHTML = `
+                <td><input type="text" name="job_number" value="${jobNumber}" form="edit_${jobNumber}"></td>
+                <td><input type="text" name="description" value="${row.cells[1].textContent}" form="edit_${jobNumber}"></td>
+                <td><input type="datetime-local" name="order_date" value="${row.cells[2].textContent.replace(' ', 'T')}" form="edit_${jobNumber}"></td>
+                <td><input type="datetime-local" name="promised_date" value="${row.cells[3].textContent.replace(' ', 'T')}" form="edit_${jobNumber}"></td>
+                <td><input type="number" name="quantity" value="${row.cells[4].textContent}" form="edit_${jobNumber}"></td>
+                <td><input type="text" name="price_each" value="${row.cells[5].textContent.replace('R', '').replace(' ', '')}" form="edit_${jobNumber}"></td>
+                <td><input type="text" name="customer" value="${row.cells[6].textContent}" form="edit_${jobNumber}"></td>
+                <td>
+                    <form id="edit_${jobNumber}" action="${updateUrl}" method="POST">
+                        <button type="submit">Save</button>
+                    </form>
+                    <button onclick="location.reload()">Cancel</button>
+                </td>
+            `;
+        }
+        function deleteJob(jobNumber) {
+            if (confirm("Are you sure you want to delete job " + jobNumber + "?")) {
+                fetch('/delete_job/' + jobNumber, { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => { if (data.success) location.reload(); });
+            }
+        }
+    </script>
+</head>
+<body>
+    <h1>Manage Jobs</h1>
+    <h2>Import Jobs from Excel</h2>
+    <form method="POST" enctype="multipart/form-data">
+        <label>Upload Excel File:</label><input type="file" name="excel_file" accept=".xls,.xlsx"><br>
+        <p>Required columns: Job Number, Order Date, Promised Date, Quantity, Price Each<br>
+           Optional: Description, Customer<br>
+           Dates in format: YYYY-MM-DD HH:MM</p>
+        <button type="submit">Import Jobs</button>
+    </form>
+    <h2>Add Job Manually</h2>
+    <form method="POST">
+        <label>Job Number:</label><input type="text" name="job_number" required><br>
+        <label>Description:</label><input type="text" name="description"><br>
+        <label>Order Date:</label><input type="datetime-local" name="order_date" required><br>
+        <label>Promised Date:</label><input type="datetime-local" name="promised_date" required><br>
+        <label>Quantity:</label><input type="number" name="quantity" min="1" required><br>
+        <label>Price Each (ZAR):</label><input type="number" name="price_each" step="0.01" required><br>
+        <label>Customer:</label><input type="text" name="customer"><br>
+        <button type="submit">Add Job</button>
+    </form>
+    <h2>Current Jobs</h2>
+    <table>
+        <tr><th>Job #</th><th>Description</th><th>Order Date</th><th>Promised Date</th><th>Qty</th><th>Price Each</th><th>Customer</th><th>Complete</th><th>Actions</th></tr>
+        {% for job in jobs %}
+            <tr data-id="{{ job.job_number }}">
+                <td>{{ job.job_number }}</td>
+                <td>{{ job.description }}</td>
+                <td>{{ job.order_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>{{ job.promised_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>{{ job.quantity }}</td>
+                <td>R{{ "{:,.2f}".format(job.price_each).replace(",", " ").replace(".", ",") }}</td>
+                <td>{{ job.customer }}</td>
+                <td>{{ job.completed }}</td>
+                <td>
+                    <button onclick="editJob('{{ job.job_number }}')">Edit</button>
+                    <button onclick="deleteJob('{{ job.job_number }}')">Delete</button>
+                </td>
+            </tr>
+        {% endfor %}
+    </table>
+    <a href="{{ url_for('index') }}">Back to Home</a>
+</body>
+</html>

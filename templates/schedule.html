@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Job Shop Schedule</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <h1>Job Shop Schedule</h1>
+    <p>Total Rand Days Late: R{{ "{:,.2f}".format(total_rand_days_late).replace(",", " ").replace(".", ",") }}</p>
+    {% if elapsed_time is not none %}
+        <p>Time Taken to Schedule: {{ "{:.2f}".format(elapsed_time) }} seconds</p>
+    {% endif %}
+    
+    <h2>Tasks</h2>
+
+    <table>
+        <tr><th>Job ID</th><th>Job Description</th><th>Job Quantity</th><th>Task Description</th><th>Machines</th><th>People</th><th>Start</th><th>End</th></tr>
+        {% for s in segments|sort(attribute='start') %}
+            <tr>
+                <td>{{ s.job_id }}</td>
+                <td>{{ s.job_description }}</td>
+                <td>{{ s.job_quantity }}</td>
+                <td>{{ s.description }}</td>
+                <td>{{ s.machines }}</td>
+                <td>{{ s.people }}</td>
+                <td>{{ s.start.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>{{ s.end.strftime('%Y-%m-%d %H:%M') }}</td>
+            </tr>
+        {% endfor %}
+    </table>
+
+    <h2>Jobs</h2>
+    <table>
+        <tr><th>Job ID</th><th>Promised Date</th><th>Total Value</th><th>Expected Finish</th><th>Rand Days Late</th></tr>
+        {% for job in jobs|sort(attribute='expected_finish') %}
+            <tr>
+                <td>{{ job.job_id }}</td>
+                <td>{{ job.promised_date.strftime('%Y-%m-%d %H:%M') if job.promised_date else '' }}</td>
+                <td>R{{ "{:,.2f}".format(job.total_value).replace(",", " ").replace(".", ",") }}</td>
+                <td>{{ job.expected_finish.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>R{{ "{:,.2f}".format(job.rand_days_late).replace(",", " ").replace(".", ",") }}</td>
+            </tr>
+        {% endfor %}
+    </table>
+    
+    <a href="{{ url_for('index') }}">Back to Home</a> | <a href="{{ url_for('gantt') }}">View Gantt Chart</a>
+</body>
+</html>

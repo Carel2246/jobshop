@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Manage Resource Groups</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script>
+        function editGroup(id) {
+            if (typeof id === 'undefined') {
+                console.error('Error: id is undefined');
+                return;
+            }
+            const row = document.querySelector(`tr[data-id="${id}"]`);
+            if (!row) {
+                console.error(`No row found for id: ${id}`);
+                return;
+            }
+            const updateUrl = '/update_resource_group/' + id;
+            row.innerHTML = `
+                <td><input type="text" name="name" value="${row.cells[0].textContent}" form="edit_${id}"></td>
+                <td><input type="text" name="resources" value="${row.cells[1].textContent}" form="edit_${id}"></td>
+                <td>
+                    <form id="edit_${id}" action="${updateUrl}" method="POST">
+                        <button type="submit">Save</button>
+                    </form>
+                    <button onclick="location.reload()">Cancel</button>
+                </td>
+            `;
+        }
+        function deleteGroup(id) {
+            if (confirm("Are you sure you want to delete resource group " + id + "?")) {
+                fetch('/delete_resource_group/' + id, { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => { if (data.success) location.reload(); });
+            }
+        }
+    </script>
+</head>
+<body>
+    <h1>Manage Resource Groups</h1>
+    <h2>Import Resource Groups from Excel</h2>
+    <form method="POST" enctype="multipart/form-data">
+        <label>Upload Excel File:</label><input type="file" name="excel_file" accept=".xls,.xlsx"><br>
+        <p>Required columns: Name, Resources (comma-separated resource names)</p>
+        <button type="submit">Import Groups</button>
+    </form>
+    <h2>Add Resource Group Manually</h2>
+    <form method="POST">
+        <label>Name:</label><input type="text" name="name" required><br>
+        <label>Resources (comma-separated):</label><input type="text" name="resources" required><br>
+        <button type="submit">Add Group</button>
+    </form>
+    <h2>Current Groups</h2>
+    <table>
+        <tr><th>Name</th><th>Resources</th><th>Actions</th></tr>
+        {% for group in groups %}
+            <tr data-id="{{ group.id }}">
+                <td>{{ group.name }}</td>
+                <td>{{ group.resources | map(attribute='name') | join(', ') }}</td>
+                <td>
+                    <button onclick="editGroup('{{ group.id }}')">Edit</button>
+                    <button onclick="deleteGroup('{{ group.id }}')">Delete</button>
+                </td>
+            </tr>
+        {% endfor %}
+    </table>
+    <p>Available Resources: {{ all_resources | map(attribute='name') | join(', ') }}</p>
+    <a href="{{ url_for('index') }}">Back to Home</a>
+</body>
+</html>
