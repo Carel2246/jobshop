@@ -5,4 +5,4 @@ pandas==2.1.4
 numpy==1.26.4
 openpyxl==3.1.2
 psycopg2-binary
-gunicorn==20.1.0
+gunicorn==23.0.0

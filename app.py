@@ -13,7 +13,7 @@ import math
 import os
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://user:password@localhost:5432/dbname')
 db = SQLAlchemy(app)
 
 logging.basicConfig(level=logging.DEBUG)
@@ -1393,4 +1393,4 @@ def toggle_job_blocked(job_number):
     return jsonify({"success": True})
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=os.getenv('FLASK_DEBUG', 'False') == 'True')
