@@ -585,80 +585,58 @@ def schedule():
     if not active_tasks:
         return render_template('index.html', error="No active tasks to schedule (all jobs blocked)", default_date=start_date.strftime('%Y-%m-%dT%H:%M'))
 
-    start_time = timer.time()
+    # Prepare data for client-side scheduling
+    job_data = [{
+        'id': job.id,
+        'job_number': job.job_number,
+        'quantity': job.quantity,
+        'price_each': job.price_each,
+        'promised_date': job.promised_date.isoformat() if job.promised_date else None
+    } for job in active_jobs]
 
-    creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
-    creator.create("Individual", list, fitness=creator.FitnessMin)
-    toolbox = base.Toolbox()
-    toolbox.register("indices", random.sample, range(len(active_tasks)), len(active_tasks))
-    toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.indices)
-    toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-    toolbox.register("mate", tools.cxOrdered)
-    toolbox.register("mutate", tools.mutShuffleIndexes, indpb=0.05)
-    toolbox.register("select", tools.selTournament, tournsize=3)
-    toolbox.register("evaluate", evaluate, tasks=active_tasks, start_date=start_date, jobs=active_jobs)
+    task_data = [{
+        'id': task.id,
+        'task_number': task.task_number,
+        'job_number': task.job_number,
+        'setup_time': task.setup_time,
+        'time_each': task.time_each,
+        'predecessors': task.predecessors.split(',') if task.predecessors else [],
+        'resources': task.resources.split(','),
+        'completed': task.completed
+    } for task in active_tasks]
 
-    population = toolbox.population(n=50)
-    hof = tools.HallOfFame(1)
-    algorithms.eaSimple(population, toolbox, cxpb=0.7, mutpb=0.2, ngen=100, halloffame=hof, verbose=False)
-    best_individual = hof[0]
+    resource_data = [{
+        'name': res.name,
+        'type': res.type
+    } for res in Resource.query.all()]
 
-    task_order = [active_tasks[i] for i in best_individual]
-    task_times = generate_schedule(task_order, active_tasks, start_date)
-    adjusted_times = adjust_to_working_hours(start_date, task_times)
-    total_rand_days_late = evaluate(best_individual, active_tasks, start_date, active_jobs)[0]
+    calendar_data = [{
+        'weekday': cal.weekday,
+        'start_time': cal.start_time.strftime('%H:%M'),
+        'end_time': cal.end_time.strftime('%H:%M')
+    } for cal in Calendar.query.all()]
 
-    # Rest of the function remains unchanged, just use active_jobs and active_tasks
-    end_time = timer.time()
-    elapsed_time = end_time - start_time
+    return jsonify({
+        'start_date': start_date.isoformat(),
+        'jobs': job_data,
+        'tasks': task_data,
+        'resources': resource_data,
+        'calendar': calendar_data
+    })
 
+@app.route('/save_schedule', methods=['POST'])
+def save_schedule():
+    data = request.get_json()
     db.session.query(Schedule).delete()
+    for seg in data['segments']:
+        db.session.add(Schedule(
+            task_number=seg['task_id'],
+            start_time=datetime.fromisoformat(seg['start']),
+            end_time=datetime.fromisoformat(seg['end']),
+            resources_used=seg['machines'] + ', ' + seg['people']
+        ))
     db.session.commit()
-
-    segments = []
-    job_dict = {job.job_number: job for job in jobs}  # Use all jobs for lookup
-    resource_dict = {res.name: res.type for res in Resource.query.all()}
-    for task in active_tasks:  # Only active tasks
-        if task.task_number in adjusted_times:
-            start, end = adjusted_times[task.task_number]
-            machines = ', '.join(res.name for res in task.selected_resources if resource_dict[res.name] == 'M')
-            people = ', '.join(res.name for res in task.selected_resources if resource_dict[res.name] == 'H')
-            job = job_dict.get(task.job_number)
-            schedule_entry = Schedule(
-                task_number=task.task_number,
-                start_time=start,
-                end_time=end,
-                resources_used=', '.join(res.name for res in task.selected_resources)
-            )
-            db.session.add(schedule_entry)
-            segments.append({
-                'task_id': task.task_number,
-                'job_id': task.job_number,
-                'job_description': job.description if job else '',
-                'job_quantity': job.quantity if job else 0,
-                'description': task.description,
-                'machines': machines,
-                'people': people,
-                'start': start,
-                'end': end
-            })
-
-    job_data = []
-    for job in active_jobs:  # Only active jobs
-        job_tasks = [t for t in active_tasks if t.job_number == job.job_number]
-        if all(t.task_number in adjusted_times or t.completed for t in job_tasks):
-            expected_finish = max(adjusted_times[t.task_number][1] for t in job_tasks if t.task_number in adjusted_times) if any(t.task_number in adjusted_times for t in job_tasks) else start_date
-            days_late = max(0, (expected_finish - job.promised_date).total_seconds() / 86400) if job.promised_date else 0
-            job_data.append({
-                'job_id': job.job_number,
-                'promised_date': job.promised_date,
-                'total_value': job.quantity * job.price_each,
-                'expected_finish': expected_finish,
-                'rand_days_late': days_late
-            })
-    db.session.commit()
-
-    return render_template('schedule.html', segments=segments, total_rand_days_late=total_rand_days_late, jobs=job_data, elapsed_time=elapsed_time)
+    return jsonify({'success': True})
 
 @app.route('/view_schedule')
 def view_schedule():
