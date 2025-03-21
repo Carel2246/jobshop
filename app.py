@@ -1393,4 +1393,4 @@ def toggle_job_blocked(job_number):
     return jsonify({"success": True})
 
 if __name__ == '__main__':
-    app.run(debug=os.getenv('FLASK_DEBUG', 'False') == 'True') 
+    app.run(debug=os.getenv('FLASK_DEBUG', 'False') == 'True')
