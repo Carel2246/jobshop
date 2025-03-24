@@ -36,15 +36,14 @@ class Job(db.Model):
     blocked = db.Column(db.Boolean, default=False, nullable=False)
 
 class Task(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    task_number = db.Column(db.String(50), unique=True, nullable=False)
-    job_number = db.Column(db.String(50), db.ForeignKey('job.job_number'), nullable=False)
-    description = db.Column(db.String(255))
-    setup_time = db.Column(db.Float, nullable=False)
-    time_each = db.Column(db.Float, nullable=False)
-    predecessors = db.Column(db.String(255))
-    resources = db.Column(db.String(255), nullable=False)
-    completed = db.Column(db.Boolean, default=False, nullable=False)
+    task_number = db.Column(db.String(20), primary_key=True)
+    job_number = db.Column(db.String(20), db.ForeignKey('job.job_number'), nullable=False)
+    description = db.Column(db.String(200), nullable=False)
+    setup_time = db.Column(db.Float, nullable=False)  # Changed to Float
+    time_each = db.Column(db.Float, nullable=False)   # Changed to Float
+    predecessors = db.Column(db.String(200))
+    resources = db.Column(db.String(200))             # Single resources column
+    completed = db.Column(db.Boolean, default=False)
 
 class Resource(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -1353,38 +1352,48 @@ def toggle_job_blocked(job_number):
 
 @app.route('/api/schedule_data', methods=['GET'])
 def schedule_data():
-    # Add authentication (e.g., API token check) here
-    jobs = Job.query.filter_by(completed=False).all()
-    job_data = [{'job_number': j.job_number, 'description': j.description, 'quantity': j.quantity} for j in jobs]
-    tasks = Task.query.all()
-    task_data = [{'task_number': t.task_number, 'job_number': t.job_number, 'description': t.description,
-                  'setup_time': t.setup_time, 'time_each': t.time_each, 'predecessors': t.predecessors,
-                  'machines': t.machines, 'humans': t.humans} for t in tasks]
-    resources = Resource.query.all()
-    resource_data = [{'name': r.name, 'type': r.type} for r in resources]
-    calendar = Calendar.query.all()
-    calendar_data = [{'weekday': c.weekday, 'start_time': c.start_time, 'end_time': c.end_time} for c in calendar]
-    return jsonify({
-        'jobs': job_data,
-        'tasks': task_data,
-        'resources': resource_data,
-        'calendar': calendar_data
-    })
+    try:
+        jobs = Job.query.filter_by(completed=False).all()
+        job_data = [{'job_number': j.job_number, 'description': j.description, 'quantity': j.quantity} for j in jobs]
+        
+        tasks = Task.query.all()
+        task_data = [{'task_number': t.task_number, 'job_number': t.job_number, 'description': t.description,
+                      'setup_time': float(t.setup_time), 'time_each': float(t.time_each), 
+                      'predecessors': t.predecessors or '', 'resources': t.resources or ''} for t in tasks]
+        
+        resources = Resource.query.all()
+        resource_data = [{'name': r.name, 'type': r.type} for r in resources]
+        
+        calendar = Calendar.query.all()
+        calendar_data = [{'weekday': c.weekday, 'start_time': c.start_time, 'end_time': c.end_time} for c in calendar]
+        
+        return jsonify({
+            'jobs': job_data,
+            'tasks': task_data,
+            'resources': resource_data,
+            'calendar': calendar_data
+        })
+    except Exception as e:
+        logger.error(f"Error in /api/schedule_data: {str(e)}", exc_info=True)
+        return jsonify({'error': f"Server error: {str(e)}"}), 500
 
 @app.route('/api/save_schedule', methods=['POST'])
 def api_save_schedule():
-    # Add authentication here
-    data = request.get_json()
-    db.session.query(Schedule).delete()
-    for seg in data['segments']:
-        db.session.add(Schedule(
-            task_number=seg['task_id'],
-            start_time=datetime.fromisoformat(seg['start']),
-            end_time=datetime.fromisoformat(seg['end']),
-            resources_used=f"{seg['machines']}, {seg['people']}"
-        ))
-    db.session.commit()
-    return jsonify({'success': True})
+    try:
+        data = request.get_json()
+        db.session.query(Schedule).delete()
+        for seg in data['segments']:
+            db.session.add(Schedule(
+                task_number=seg['task_id'],
+                start_time=datetime.fromisoformat(seg['start']),
+                end_time=datetime.fromisoformat(seg['end']),
+                resources_used=seg['resources']
+            ))
+        db.session.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"Error in /api/save_schedule: {str(e)}", exc_info=True)
+        return jsonify({'error': f"Server error: {str(e)}"}), 500
 
 if __name__ == '__main__':
     app.run(debug=os.getenv('FLASK_DEBUG', 'False') == 'True')

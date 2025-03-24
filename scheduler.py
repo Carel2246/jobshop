@@ -7,15 +7,13 @@ import random
 import json
 
 # Configuration
-API_BASE_URL = "https://nmiproduksie.azurewebsites.net/"  # Replace with your Azure app URL
-API_TOKEN = "your_secure_api_token"  # Add authentication later
+API_BASE_URL = "https://nmiproduksie.azurewebsites.net"
 
 class SchedulerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Nigel Metal Scheduler")
         
-        # GUI Elements
         tk.Label(root, text="Start Date:").pack(pady=5)
         self.start_date_entry = tk.Entry(root)
         self.start_date_entry.insert(0, datetime.now().strftime('%Y-%m-%dT%H:%M'))
@@ -27,22 +25,20 @@ class SchedulerApp:
         tk.Button(root, text="Generate Schedule", command=self.run_schedule).pack(pady=10)
 
     def fetch_data(self):
-        headers = {'Authorization': f'Bearer {API_TOKEN}'}
-        response = requests.get(f"{API_BASE_URL}/api/schedule_data", headers=headers)
+        response = requests.get(f"{API_BASE_URL}/api/schedule_data")
         if response.status_code != 200:
-            raise Exception(f"Failed to fetch data: {response.text}")
+            raise Exception(f"Failed to fetch data: {response.status_code} - {response.text}")
         return response.json()
 
     def save_schedule(self, result):
-        headers = {'Authorization': f'Bearer {API_TOKEN}', 'Content-Type': 'application/json'}
-        response = requests.post(f"{API_BASE_URL}/api/save_schedule", json=result, headers=headers)
+        response = requests.post(f"{API_BASE_URL}/api/save_schedule", json=result)
         if response.status_code != 200:
-            raise Exception(f"Failed to save schedule: {response.text}")
+            raise Exception(f"Failed to save schedule: {response.status_code} - {response.text}")
 
     def run_schedule(self):
         self.status_label.config(text="Fetching data...")
         self.root.update()
-        
+
         try:
             data = self.fetch_data()
             start_date = datetime.strptime(self.start_date_entry.get(), '%Y-%m-%dT%H:%M')
@@ -50,16 +46,15 @@ class SchedulerApp:
             self.status_label.config(text="Scheduling in progress...")
             self.root.update()
 
-            # Prepare data
             jobs = data['jobs']
             tasks = data['tasks']
-            resources = data['resources']
+            resources = {r['name']: r['type'] for r in data['resources']}  # Map resource names to types
             calendar = {c['weekday']: (
                 datetime.strptime(c['start_time'], '%H:%M').time(),
                 datetime.strptime(c['end_time'], '%H:%M').time()
             ) for c in data['calendar']}
 
-            # DEAP setup (your existing or enhanced logic)
+            # DEAP setup
             creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
             creator.create("Individual", list, fitness=creator.FitnessMin)
             
@@ -69,7 +64,6 @@ class SchedulerApp:
             toolbox.register("population", tools.initRepeat, list, toolbox.individual)
 
             def evaluate(individual):
-                # Simplified: minimize total duration (enhance as needed)
                 current_time = start_date
                 for idx in individual:
                     task = tasks[idx]
@@ -86,7 +80,7 @@ class SchedulerApp:
             algorithms.eaSimple(pop, toolbox, cxpb=0.5, mutpb=0.2, ngen=40, verbose=False)
             best_ind = tools.selBest(pop, 1)[0]
 
-            # Build schedule from best individual
+            # Build schedule
             result = {'segments': []}
             current_time = start_date
             for idx in best_ind:
@@ -97,8 +91,7 @@ class SchedulerApp:
                     'task_id': task['task_number'],
                     'start': current_time.isoformat(),
                     'end': end_time.isoformat(),
-                    'machines': task['machines'],
-                    'people': task['humans']
+                    'resources': task['resources']
                 })
                 current_time = end_time
 
@@ -109,7 +102,7 @@ class SchedulerApp:
             self.status_label.config(text="Schedule generated and saved!")
             messagebox.showinfo("Success", "Schedule generated and saved successfully!")
         except Exception as e:
-            self.status_label.config(text="Error occurred")
+            self.status_label.config(text=f"Error: {str(e)}")
             messagebox.showerror("Error", str(e))
 
 if __name__ == "__main__":
