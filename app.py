@@ -1299,16 +1299,29 @@ def schedule_data():
             'time_each': float(t.time_each),
             'predecessors': t.predecessors or '',
             'resources': t.resources or '',
-            'completed': t.completed  # Ensure this is included
+            'completed': bool(t.completed)
         } for t in tasks]
         
         # Fetch resources
         resources = Resource.query.all()
         resource_data = [{'name': r.name, 'type': r.type} for r in resources]
         
-        # Fetch resource groups (assuming a ResourceGroup model exists)
+        # Fetch resource groups and their associated resources
         resource_groups = ResourceGroup.query.all()
-        resource_group_data = [{'group_name': rg.group_name, 'resources': rg.resources or ''} for rg in resource_groups]
+        resource_group_data = []
+        for rg in resource_groups:
+            # Join with resource_group_association and resource to get associated resources
+            associated_resources = (
+                db.session.query(Resource)
+                .join(resource_group_association, resource_group_association.resource_id == Resource.id)
+                .filter(resource_group_association.group_id == rg.id)
+                .all()
+            )
+            resource_names = [r.name for r in associated_resources]
+            resource_group_data.append({
+                'group_name': rg.name,  # Changed from rg.group_name to rg.name
+                'resources': resource_names
+            })
         
         # Fetch calendar
         calendar = Calendar.query.all()
@@ -1319,7 +1332,7 @@ def schedule_data():
             'jobs': job_data,
             'tasks': task_data,
             'resources': resource_data,
-            'resource_groups': resource_group_data,  # Restore resource groups
+            'resource_groups': resource_group_data,
             'calendar': calendar_data
         }
         

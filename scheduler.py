@@ -55,7 +55,7 @@ class SchedulerApp:
             raise Exception(f"Failed to fetch data: {response.status_code} - {response.text}")
         data = response.json()
         self.log_to_terminal("Raw task data sample:")
-        for t in data['tasks'][:5]:  # Log first 5 tasks for debugging
+        for t in data['tasks'][:5]:
             self.log_to_terminal(f"Task {t['task_number']}: {t}")
         self.log_to_terminal("Data retrieved successfully.")
         return data
@@ -67,21 +67,22 @@ class SchedulerApp:
             raise Exception(f"Failed to save schedule: {response.status_code} - {response.text}")
         self.log_to_terminal("Schedule synced with central systems.")
 
-    def resolve_resources(self, tasks, resources):
-        self.log_to_terminal("Reconfiguring resource matrix...")
+    def resolve_resources(self, tasks, resources, resource_groups):
+        self.log_to_terminal("Analyzing resource requirements...")
         resource_dict = {r['name']: r['type'] for r in resources}
+        group_dict = {rg['group_name']: rg['resources'] for rg in resource_groups}
+
         for task in tasks:
             resource_names = [r.strip() for r in task['resources'].split(',') if r.strip()]
             resolved = []
             for res in resource_names:
                 if res in resource_dict:
-                    resolved.append(res)
+                    resolved.append({'type': 'resource', 'name': res})
+                elif res in group_dict:
+                    resolved.append({'type': 'group', 'name': res})
                 else:
-                    available = [r for r, t in resource_dict.items() if t in ['H', 'M']]
-                    if available:
-                        resolved.append(random.choice(available))
-                    else:
-                        resolved.append(res)
+                    self.log_to_terminal(f"Warning: Resource or group {res} not found")
+                    resolved.append({'type': 'resource', 'name': res})
             task['resolved_resources'] = resolved
 
     def is_task_completed(self, task):
@@ -153,7 +154,8 @@ class SchedulerApp:
             self.log_to_terminal(f"Filtered tasks: {len(tasks)} out of {len(data['tasks'])}")
             
             resources = data['resources']
-            # Note: resource_groups are available in data['resource_groups'] but not used in scheduling yet
+            resource_groups = data['resource_groups']
+            group_dict = {rg['group_name']: rg['resources'] for rg in resource_groups}
             calendar = []
             for c in data['calendar']:
                 try:
@@ -166,7 +168,7 @@ class SchedulerApp:
                     end_time = datetime.strptime(c['end_time'], '%H:%M:%S').time()
                 calendar.append(type('Calendar', (), {'weekday': c['weekday'], 'start_time': start_time, 'end_time': end_time}))
 
-            self.resolve_resources(tasks, resources)
+            self.resolve_resources(tasks, resources, resource_groups)
 
             creator.create("FitnessMin", base.Fitness, weights=(-1.0, -1.0))
             creator.create("Individual", list, fitness=creator.FitnessMin)
@@ -188,29 +190,43 @@ class SchedulerApp:
 
                     earliest_start = start_date if not task_times else max(t[1] for t in task_times.values())
                     latest_busy = earliest_start
+
+                    resolved_resources = []
                     for res in required_res:
-                        busy_times = resource_busy.get(res, [])
-                        for start, end in sorted(busy_times, key=lambda x: x[0]):
-                            if start <= latest_busy < end:
-                                latest_busy = end
-                            elif start > latest_busy and (start - latest_busy).total_seconds() / 60 >= duration:
-                                break
+                        if res['type'] == 'resource':
+                            resolved_resources.append(res['name'])
+                        elif res['type'] == 'group':
+                            group_resources = group_dict.get(res['name'], [])
+                            available = None
+                            for r in group_resources:
+                                busy_times = resource_busy.get(r, [])
+                                is_busy = False
+                                for start, end in busy_times:
+                                    if not (end <= latest_busy or start >= latest_busy + timedelta(minutes=duration)):
+                                        is_busy = True
+                                        break
+                                if not is_busy:
+                                    available = r
+                                    break
+                            if available:
+                                resolved_resources.append(available)
                             else:
-                                latest_busy = max(latest_busy, end)
+                                conflicts += 1
+                                resolved_resources.append(group_resources[0] if group_resources else res['name'])
 
                     start_time = latest_busy
                     end_time = start_time + timedelta(minutes=duration)
 
-                    for res in required_res:
-                        overlaps = [t for t in resource_busy[res] if not (t[1] <= start_time or t[0] >= end_time)]
+                    for res in resolved_resources:
+                        overlaps = [t for t in resource_busy.get(res, []) if not (t[1] <= start_time or t[0] >= end_time)]
                         conflicts += len(overlaps)
                         resource_busy[res].append((start_time, end_time))
 
                     task_times[idx] = (start_time, end_time)
 
                 adjusted_schedule = self.adjust_to_working_hours(start_date, 
-                                                                {idx: (task['setup_time'] + task['time_each'], task['resolved_resources']) 
-                                                                 for idx, task in enumerate(tasks)}, 
+                                                                {idx: (task['setup_time'] + task['time_each'], resolved_resources) 
+                                                                 for idx, resolved_resources in enumerate([t['resolved_resources'] for t in tasks])}, 
                                                                 calendar)
                 total_time = max((t['end'] - start_date).total_seconds() for t in adjusted_schedule.values()) if adjusted_schedule else 0
                 return (total_time, conflicts)
@@ -241,17 +257,30 @@ class SchedulerApp:
 
                 earliest_start = start_date if not task_schedule else max(t[1] for t in task_schedule.values())
                 latest_busy = earliest_start
-                for res in required_res:
-                    busy_times = resource_busy.get(res, [])
-                    for start, end in sorted(busy_times, key=lambda x: x[0]):
-                        if start <= latest_busy < end:
-                            latest_busy = end
-                        elif start > latest_busy and (start - latest_busy).total_seconds() / 60 >= duration:
-                            break
-                        else:
-                            latest_busy = max(latest_busy, end)
 
-                task_schedule[idx] = (duration, required_res)
+                resolved_resources = []
+                for res in required_res:
+                    if res['type'] == 'resource':
+                        resolved_resources.append(res['name'])
+                    elif res['type'] == 'group':
+                        group_resources = group_dict.get(res['name'], [])
+                        available = None
+                        for r in group_resources:
+                            busy_times = resource_busy.get(r, [])
+                            is_busy = False
+                            for start, end in busy_times:
+                                if not (end <= latest_busy or start >= latest_busy + timedelta(minutes=duration)):
+                                    is_busy = True
+                                    break
+                            if not is_busy:
+                                available = r
+                                break
+                        if available:
+                            resolved_resources.append(available)
+                        else:
+                            resolved_resources.append(group_resources[0] if group_resources else res['name'])
+
+                task_schedule[idx] = (duration, resolved_resources)
 
             adjusted_schedule = self.adjust_to_working_hours(start_date, task_schedule, calendar)
             for idx, times in adjusted_schedule.items():
