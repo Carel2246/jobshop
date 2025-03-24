@@ -183,6 +183,7 @@
 <body>
     <div class="container">
         <h1>Review Jobs</h1>
+        <div id="scheduling-message" style="color: orange; display: none;">Scheduling is currently in progress...</div>
         <button onclick="window.location.href='{{ url_for('index') }}'">Home</button>
         <button onclick="window.location.href='{{ url_for('add_job_with_tasks') }}'">Add Job</button>
 
@@ -196,7 +197,7 @@
                 <option value="">-- Select a Job --</option>
                 {% for job in jobs %}
                     <option value="{{ job.job_number }}" {% if selected_job and selected_job.job_number == job.job_number %}selected{% endif %}>
-                        {{ job.job_number }} - {{ job.description }} {% if job.completed %}[Completed]{% endif %}
+                        {{ job.job_number }} - {{ job.description | e }} {% if job.completed %}[Completed]{% endif %}
                     </option>
                 {% endfor %}
             </select><br>
@@ -208,7 +209,7 @@
             {% if selected_job %}
                 <h2>Job Details</h2>
                 <label for="description">Description:</label>
-                <input type="text" id="description" name="description" value="{{ selected_job.description }}"><br>
+                <input type="text" id="description" name="description" value="{{ selected_job.description | e }}"><br>
                 <label for="order_date">Order Date:</label>
                 <input type="datetime-local" id="order_date" name="order_date" value="{{ selected_job.order_date.strftime('%Y-%m-%dT%H:%M') if selected_job.order_date else '' }}"><br>
                 <label for="promised_date">Promised Date:</label>
@@ -243,49 +244,46 @@
                 </table>
                 <button type="button" onclick="addTaskRow()">Add Task</button>
 
-                <h2>Materials</h2>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Description</th>
-                            <th>Quantity</th>
-                            <th>Unit</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="materials-body">
-                        <!-- Populated dynamically -->
-                    </tbody>
-                </table>
-                <button type="button" onclick="addMaterialRow()">Add Material</button>
-
                 <h2>Task Flowchart</h2>
                 <div id="flowchart" class="mermaid">
                     {% if tasks %}
                         graph LR
                         {% for task in tasks %}
-                            {{ task.task_number }}["{{ task.task_number }}<br>{{ task.description }}"]
+                            {{ task.task_number }}["{{ task.task_number }}<br>{{ task.description | e | default('') }}"]
                             {% if task.completed %}
                                 class {{ task.task_number }} completed;
                             {% endif %}
                             {% if task.predecessors %}
                                 {% for pred in task.predecessors.split(',') %}
                                     {% set trimmed_pred = pred|trim %}
-{% if trimmed_pred in tasks|map(attribute='task_number') %}
+                                    {% if trimmed_pred in tasks|map(attribute='task_number') %}
                                         {{ trimmed_pred }} --> {{ task.task_number }}
                                     {% endif %}
                                 {% endfor %}
-                            {% endfor %}
-                            classDef completed fill:#d4edda,stroke:#333;
-                        {% else %}
-                            graph LR
-                            A[No Tasks Available]
-                        {% endif %}
-                    </div>
+                            {% endif %}
+                        {% endfor %}
+                        classDef completed fill:#d4edda,stroke:#333;
+                    {% else %}
+                        graph LR
+                        A[No Tasks Available]
+                    {% endif %}
+                </div>
 
                 <br><button type="submit" name="update">Update Job</button>
             {% endif %}
         </form>
     </div>
+    <script>
+        function updateSchedulingMessage() {
+            const message = document.getElementById('scheduling-message');
+            if (sessionStorage.getItem('schedulingInProgress') === 'true') {
+                message.style.display = 'block';
+            } else {
+                message.style.display = 'none';
+            }
+        }
+        document.addEventListener('DOMContentLoaded', updateSchedulingMessage);
+        window.addEventListener('storage', updateSchedulingMessage);
+    </script>
 </body>
 </html>

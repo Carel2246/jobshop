@@ -9,14 +9,56 @@
     </style>
 </head>
 <body>
-    <h1>Generate Schedule</h1>
-    <form id="schedule-form">
-        <label for="start_date">Start Date:</label>
-        <input type="datetime-local" id="start_date" name="start_date" value="{{ default_date }}">
-        <button type="submit">Run Schedule Locally</button>
-    </form>
-    <div id="loading">Processing... (This may take a few minutes)</div>
-    <div id="schedule-result"></div>
+    <div class="container">
+        <h1>Schedule</h1>
+        <div id="scheduling-message" style="color: orange; display: none;">Scheduling is currently in progress...</div>
+        <button onclick="window.location.href='{{ url_for('index') }}'">Home</button>
+        <button onclick="window.location.href='{{ url_for('review_jobs') }}'">Review Jobs</button>
+        <button onclick="window.location.href='{{ url_for('production_schedule') }}'">Production Schedule</button>
+
+        <h2>Generate New Schedule</h2>
+        <form id="schedule-form">
+            <label for="start_date">Start Date:</label>
+            <input type="datetime-local" id="start_date" name="start_date" value="{{ default_date }}">
+            <button type="submit">Run Schedule Locally</button>
+        </form>
+        <div id="loading">Scheduling in Progress... (This may take a few minutes)</div>
+        <div id="schedule-result"></div>
+
+        {% if segments is defined %}
+            <h2>Current Schedule</h2>
+            {% if segments %}
+                <table border="1">
+                    <tr>
+                        <th>Task ID</th>
+                        <th>Job ID</th>
+                        <th>Job Description</th>
+                        <th>Quantity</th>
+                        <th>Task Description</th>
+                        <th>Machines</th>
+                        <th>People</th>
+                        <th>Start</th>
+                        <th>End</th>
+                    </tr>
+                    {% for seg in segments %}
+                        <tr>
+                            <td>{{ seg.task_id }}</td>
+                            <td>{{ seg.job_id }}</td>
+                            <td>{{ seg.job_description }}</td>
+                            <td>{{ seg.job_quantity }}</td>
+                            <td>{{ seg.description }}</td>
+                            <td>{{ seg.machines }}</td>
+                            <td>{{ seg.people }}</td>
+                            <td>{{ seg.start }}</td>
+                            <td>{{ seg.end }}</td>
+                        </tr>
+                    {% endfor %}
+                </table>
+            {% else %}
+                <p style="color: red;">No schedule available in the database.</p>
+            {% endif %}
+        {% endif %}
+    </div>
 
     <script>
         async function runScheduler(event) {
@@ -25,6 +67,7 @@
             const resultDiv = document.getElementById('schedule-result');
             loading.style.display = 'block';
             resultDiv.innerHTML = '';
+            sessionStorage.setItem('schedulingInProgress', 'true');
 
             try {
                 const formData = new FormData(document.getElementById('schedule-form'));
@@ -37,7 +80,13 @@
                 if (data.error) throw new Error(data.error);
 
                 let pyodide = await loadPyodide();
-                await pyodide.loadPackage('deap');
+                console.log('Pyodide loaded');
+                try {
+                    await pyodide.loadPackage('deap');
+                    console.log('DEAP loaded');
+                } catch (e) {
+                    throw new Error('Failed to load DEAP: ' + e.message);
+                }
 
                 pyodide.globals.set('start_date', data.start_date);
                 pyodide.globals.set('jobs', data.jobs);
@@ -220,36 +269,6 @@
 
                 const result = pyodide.globals.get('result').toJs();
                 loading.style.display = 'none';
-                resultDiv.innerHTML = `
-                    <h2>Schedule</h2>
-                    <p>Total RAND Days Late: ${result.total_rand_days_late.toFixed(2)}</p>
-                    <table border="1">
-                        <tr>
-                            <th>Task ID</th>
-                            <th>Job ID</th>
-                            <th>Job Description</th>
-                            <th>Quantity</th>
-                            <th>Task Description</th>
-                            <th>Machines</th>
-                            <th>People</th>
-                            <th>Start</th>
-                            <th>End</th>
-                        </tr>
-                        ${result.segments.map(seg => `
-                            <tr>
-                                <td>${seg.task_id}</td>
-                                <td>${seg.job_id}</td>
-                                <td>${seg.job_description}</td>
-                                <td>${seg.job_quantity}</td>
-                                <td>${seg.description}</td>
-                                <td>${seg.machines}</td>
-                                <td>${seg.people}</td>
-                                <td>${seg.start}</td>
-                                <td>${seg.end}</td>
-                            </tr>
-                        `).join('')}
-                    </table>
-                `;
 
                 const saveResponse = await fetch('/save_schedule', {
                     method: 'POST',
@@ -258,17 +277,32 @@
                 });
                 const saveData = await saveResponse.json();
                 if (saveData.success) {
-                    resultDiv.innerHTML += '<p style="color: green;">Schedule saved to database!</p>';
+                    sessionStorage.removeItem('schedulingInProgress');
+                    alert('Scheduling completed successfully!');
+                    resultDiv.innerHTML = '<p style="color: green;">Schedule generated and saved. Reload or check other pages.</p>';
                 } else {
                     throw new Error('Failed to save schedule');
                 }
             } catch (error) {
+                console.error('Scheduling error:', error);
                 loading.style.display = 'none';
+                sessionStorage.removeItem('schedulingInProgress');
                 resultDiv.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
             }
         }
 
         document.getElementById('schedule-form').addEventListener('submit', runScheduler);
+
+        function updateSchedulingMessage() {
+            const message = document.getElementById('scheduling-message');
+            if (sessionStorage.getItem('schedulingInProgress') === 'true') {
+                message.style.display = 'block';
+            } else {
+                message.style.display = 'none';
+            }
+        }
+        document.addEventListener('DOMContentLoaded', updateSchedulingMessage);
+        window.addEventListener('storage', updateSchedulingMessage);
     </script>
 </body>
 </html>

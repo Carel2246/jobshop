@@ -9,6 +9,7 @@
     <div class="container">
         <h1>Nigel Metal Scheduler</h1>
         <p>Welcome to the alpha release of our scheduling app - 2025-03-24 12:57</p>
+        <div id="scheduling-message" style="color: orange; display: none;">Scheduling is currently in progress...</div>
 
         <h2>Setup</h2>
         <p>
@@ -49,5 +50,18 @@
             <p style="color: red;">{{ error }}</p>
         {% endif %}
     </div>
+    <script>
+        function updateSchedulingMessage() {
+            const message = document.getElementById('scheduling-message');
+            if (sessionStorage.getItem('schedulingInProgress') === 'true') {
+                message.style.display = 'block';
+            } else {
+                message.style.display = 'none';
+            }
+        }
+        document.addEventListener('DOMContentLoaded', updateSchedulingMessage);
+        // Update message on navigation or refresh
+        window.addEventListener('storage', updateSchedulingMessage);
+    </script>
 </body>
 </html>

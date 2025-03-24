@@ -570,10 +570,6 @@ def delete_calendar(weekday):
     db.session.commit()
     return jsonify({"success": True})
 
-@app.route('/schedule', methods=['GET'])
-def schedule_form():
-    return render_template('schedule.html', default_date=datetime.now().strftime('%Y-%m-%dT%H:%M'))
-
 @app.route('/schedule', methods=['POST'])
 def schedule():
     start_date = datetime.strptime(request.form['start_date'], '%Y-%m-%dT%H:%M')
@@ -644,22 +640,21 @@ def save_schedule():
 
 @app.route('/view_schedule')
 def view_schedule():
-    schedules = Schedule.query.all()
+    schedules = Schedule.query.order_by(Schedule.start_time).all()
     segments = []
     jobs = Job.query.all()
     tasks = Task.query.all()
     job_dict = {job.job_number: job for job in jobs}
     task_dict = {task.task_number: task for task in tasks}
     resource_dict = {res.name: res.type for res in Resource.query.all()}
-    task_times = {s.task_number: (s.start_time, s.end_time) for s in schedules}
     
     for s in schedules:
         task = task_dict.get(s.task_number)
-        job = job_dict.get(task.job_number if task else '')
+        job = job_dict.get(task.job_number) if task else None
         if task:
             resources = [res.strip() for res in s.resources_used.split(',')]
-            machines = ', '.join(res for res in resources if resource_dict.get(res, '') == 'M')
-            people = ', '.join(res for res in resources if resource_dict.get(res, '') == 'H')
+            machines = ', '.join(res for res in resources if resource_dict.get(res) == 'M')
+            people = ', '.join(res for res in resources if resource_dict.get(res) == 'H')
             segments.append({
                 'task_id': s.task_number,
                 'job_id': task.job_number,
@@ -668,27 +663,11 @@ def view_schedule():
                 'description': task.description,
                 'machines': machines,
                 'people': people,
-                'start': s.start_time,
-                'end': s.end_time
+                'start': s.start_time.strftime('%Y-%m-%d %H:%M'),
+                'end': s.end_time.strftime('%Y-%m-%d %H:%M')
             })
 
-    total_rand_days_late = 0
-    job_data = []
-    for job in jobs:
-        job_tasks = [t for t in tasks if t.job_number == job.job_number]
-        if all(t.task_number in task_times or t.completed for t in job_tasks):
-            expected_finish = max(task_times[t.task_number][1] for t in job_tasks if t.task_number in task_times) if any(t.task_number in task_times for t in job_tasks) else datetime.now()
-            days_late = max(0, (expected_finish - job.promised_date).total_seconds() / 86400) if job.promised_date else 0
-            total_rand_days_late += days_late * job.price_each * job.quantity
-            job_data.append({
-                'job_id': job.job_number,
-                'promised_date': job.promised_date,
-                'total_value': job.quantity * job.price_each,
-                'expected_finish': expected_finish,
-                'rand_days_late': days_late
-            })
-
-    return render_template('schedule.html', segments=segments, total_rand_days_late=total_rand_days_late, jobs=job_data, elapsed_time=None)
+    return render_template('schedule.html', segments=segments, default_date=datetime.now().strftime('%Y-%m-%dT%H:%M'))
 
 @app.route('/gantt')
 def gantt():
@@ -1133,109 +1112,116 @@ def validate_resources():
 
 @app.route('/review_jobs', methods=['GET', 'POST'])
 def review_jobs():
-    include_completed = request.args.get('include_completed', 'false').lower() == 'true'
-    jobs = Job.query.all() if include_completed else Job.query.filter_by(completed=False).all()
+    try:
+        include_completed = request.args.get('include_completed', 'false').lower() == 'true'
+        jobs = Job.query.all() if include_completed else Job.query.filter_by(completed=False).all()
 
-    machine_resources = Resource.query.filter_by(type='M').all()
-    human_resources = Resource.query.filter_by(type='H').all()
-    machine_groups = ResourceGroup.query.filter_by(type='M').all()
-    human_groups = ResourceGroup.query.filter_by(type='H').all()
+        machine_resources = Resource.query.filter_by(type='M').all()
+        human_resources = Resource.query.filter_by(type='H').all()
+        machine_groups = ResourceGroup.query.filter_by(type='M').all()
+        human_groups = ResourceGroup.query.filter_by(type='H').all()
 
-    selected_job = None
-    tasks = []
-    materials = []
+        selected_job = None
+        tasks = []
+        materials = []
 
-    job_number = request.form.get('job_number') if request.method == 'POST' else request.args.get('job_number')
-    if job_number:
-        selected_job = Job.query.filter_by(job_number=job_number).first()
-        if selected_job:
-            tasks = Task.query.filter_by(job_number=job_number).all()
-            materials = Material.query.filter_by(job_number=job_number).all()
+        job_number = request.form.get('job_number') if request.method == 'POST' else request.args.get('job_number')
+        if job_number:
+            selected_job = Job.query.filter_by(job_number=job_number).first()
+            if selected_job:
+                tasks = Task.query.filter_by(job_number=job_number).all()
+                materials = Material.query.filter_by(job_number=job_number).all()
 
-    if request.method == 'POST' and 'update' in request.form and selected_job:
-        selected_job.description = request.form.get('description', '')
-        order_date_str = request.form.get('order_date')
-        promised_date_str = request.form.get('promised_date')
-        selected_job.order_date = datetime.fromisoformat(order_date_str) if order_date_str else None
-        selected_job.promised_date = datetime.fromisoformat(promised_date_str) if promised_date_str else None
-        selected_job.quantity = int(request.form['quantity'])
-        selected_job.price_each = float(request.form['price_each'])
-        selected_job.customer = request.form.get('customer', '')
-        selected_job.blocked = 'blocked' in request.form
+        if request.method == 'POST' and 'update' in request.form and selected_job:
+            selected_job.description = request.form.get('description', '')
+            order_date_str = request.form.get('order_date')
+            promised_date_str = request.form.get('promised_date')
+            selected_job.order_date = datetime.fromisoformat(order_date_str) if order_date_str else None
+            selected_job.promised_date = datetime.fromisoformat(promised_date_str) if promised_date_str else None
+            selected_job.quantity = int(request.form['quantity'])
+            selected_job.price_each = float(request.form['price_each'])
+            selected_job.customer = request.form.get('customer', '')
+            selected_job.blocked = 'blocked' in request.form
 
-        tasks_data = {}
-        materials_data = {}
-        for key in request.form:
-            if key.startswith('tasks['):
-                parts = key[6:-1].split('][')
-                index, field = parts[0], parts[1]
-                if index not in tasks_data:
-                    tasks_data[index] = {}
-                tasks_data[index][field] = request.form[key]
-            elif key.startswith('materials['):
-                parts = key[10:-1].split('][')
-                index, field = parts[0], parts[1]
-                if index not in materials_data:
-                    materials_data[index] = {}
-                materials_data[index][field] = request.form[key]
+            tasks_data = {}
+            materials_data = {}
+            for key in request.form:
+                if key.startswith('tasks['):
+                    parts = key[6:-1].split('][')
+                    index, field = parts[0], parts[1]
+                    if index not in tasks_data:
+                        tasks_data[index] = {}
+                    tasks_data[index][field] = request.form[key]
+                elif key.startswith('materials['):
+                    parts = key[10:-1].split('][')
+                    index, field = parts[0], parts[1]
+                    if index not in materials_data:
+                        materials_data[index] = {}
+                    materials_data[index][field] = request.form[key]
 
-        existing_tasks = {task.task_number: task for task in tasks}
-        valid_resources = {r.name for r in Resource.query.all()}
-        valid_groups = {g.name for g in ResourceGroup.query.all()}
-        all_valid = valid_resources.union(valid_groups)
+            existing_tasks = {task.task_number: task for task in tasks}
+            valid_resources = {r.name for r in Resource.query.all()}
+            valid_groups = {g.name for g in ResourceGroup.query.all()}
+            all_valid = valid_resources.union(valid_groups)
 
-        submitted_task_numbers = {task_info['task_number'] for task_info in tasks_data.values()}
-        for task in tasks:
-            if task.task_number not in submitted_task_numbers:
-                db.session.delete(task)
+            submitted_task_numbers = {task_info['task_number'] for task_info in tasks_data.values()}
+            for task in tasks:
+                if task.task_number not in submitted_task_numbers:
+                    db.session.delete(task)
 
-        for index, task_info in tasks_data.items():
-            resources = ','.join(filter(None, [task_info.get('machines', ''), task_info.get('humans', '')]))
-            invalid = [r.strip() for r in resources.split(',') if r.strip() and r.strip() not in all_valid]
-            if invalid:
-                return render_template('review_jobs.html', jobs=jobs, selected_job=selected_job, tasks=tasks, materials=materials,
-                                       include_completed=include_completed, machine_resources=machine_resources, human_resources=human_resources,
-                                       machine_groups=machine_groups, human_groups=human_groups,
-                                       error=f"Invalid resources in task {task_info['task_number']}: {', '.join(invalid)}")
-            task_number = task_info['task_number']
-            if task_number in existing_tasks:
-                task = existing_tasks[task_number]
-                task.description = task_info.get('description', '')
-                task.setup_time = float(task_info['setup_time'])
-                task.time_each = float(task_info['time_each'])
-                task.predecessors = task_info.get('predecessors', '')
-                task.resources = resources
-                task.completed = 'completed' in task_info
-            else:
-                task = Task(
-                    task_number=task_number,
+            for index, task_info in tasks_data.items():
+                resources = ','.join(filter(None, [task_info.get('machines', ''), task_info.get('humans', '')]))
+                invalid = [r.strip() for r in resources.split(',') if r.strip() and r.strip() not in all_valid]
+                if invalid:
+                    return render_template('review_jobs.html', jobs=jobs, selected_job=selected_job, tasks=tasks, materials=materials,
+                                        include_completed=include_completed, machine_resources=machine_resources, human_resources=human_resources,
+                                        machine_groups=machine_groups, human_groups=human_groups,
+                                        error=f"Invalid resources in task {task_info['task_number']}: {', '.join(invalid)}")
+                task_number = task_info['task_number']
+                if task_number in existing_tasks:
+                    task = existing_tasks[task_number]
+                    task.description = task_info.get('description', '')
+                    task.setup_time = float(task_info['setup_time'])
+                    task.time_each = float(task_info['time_each'])
+                    task.predecessors = task_info.get('predecessors', '')
+                    task.resources = resources
+                    task.completed = 'completed' in task_info
+                else:
+                    task = Task(
+                        task_number=task_number,
+                        job_number=job_number,
+                        description=task_info.get('description', ''),
+                        setup_time=float(task_info['setup_time']),
+                        time_each=float(task_info['time_each']),
+                        predecessors=task_info.get('predecessors', ''),
+                        resources=resources,
+                        completed='completed' in task_info
+                    )
+                    db.session.add(task)
+
+            Material.query.filter_by(job_number=job_number).delete()
+            for index, material_info in materials_data.items():
+                material = Material(
                     job_number=job_number,
-                    description=task_info.get('description', ''),
-                    setup_time=float(task_info['setup_time']),
-                    time_each=float(task_info['time_each']),
-                    predecessors=task_info.get('predecessors', ''),
-                    resources=resources,
-                    completed='completed' in task_info
+                    description=material_info['description'],
+                    quantity=float(material_info['quantity']),
+                    unit=material_info['unit']
                 )
-                db.session.add(task)
+                db.session.add(material)
 
-        Material.query.filter_by(job_number=job_number).delete()
-        for index, material_info in materials_data.items():
-            material = Material(
-                job_number=job_number,
-                description=material_info['description'],
-                quantity=float(material_info['quantity']),
-                unit=material_info['unit']
-            )
-            db.session.add(material)
+            db.session.commit()
+            update_job_completion(job_number)  # Check completion after every update
+            return redirect(url_for('review_jobs', include_completed=include_completed, job_number=job_number))
 
-        db.session.commit()
-        update_job_completion(job_number)  # Check completion after every update
-        return redirect(url_for('review_jobs', include_completed=include_completed, job_number=job_number))
+        return render_template('review_jobs.html', jobs=jobs, selected_job=selected_job, tasks=tasks, materials=materials,
+                              include_completed=include_completed, machine_resources=machine_resources, human_resources=human_resources,
+                              machine_groups=machine_groups, human_groups=human_groups)
 
-    return render_template('review_jobs.html', jobs=jobs, selected_job=selected_job, tasks=tasks, materials=materials,
-                          include_completed=include_completed, machine_resources=machine_resources, human_resources=human_resources,
-                          machine_groups=machine_groups, human_groups=human_groups)
+    except Exception as e:
+        logger.error(f"Error in /review_jobs: {str(e)}", exc_info=True)
+        return render_template('review_jobs.html', error=f"Server error: {str(e)}", jobs=[], selected_job=None, tasks=[],
+                              materials=[], include_completed=include_completed, machine_resources=[], human_resources=[],
+                              machine_groups=[], human_groups=[]), 500
 
 @app.route('/cash_flow', methods=['GET'])
 def cash_flow():
