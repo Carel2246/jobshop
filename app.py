@@ -1285,30 +1285,45 @@ def toggle_job_blocked(job_number):
 @app.route('/api/schedule_data', methods=['GET'])
 def schedule_data():
     try:
+        # Fetch jobs (only incomplete ones)
         jobs = Job.query.filter_by(completed=False).all()
         job_data = [{'job_number': j.job_number, 'description': j.description, 'quantity': j.quantity} for j in jobs]
         
+        # Fetch all tasks, including completed field
         tasks = Task.query.all()
-        task_data = [{'task_number': t.task_number, 'job_number': t.job_number, 'description': t.description,
-                      'setup_time': float(t.setup_time), 'time_each': float(t.time_each), 
-                      'predecessors': t.predecessors or '', 'resources': t.resources or ''} for t in tasks]
+        task_data = [{
+            'task_number': t.task_number,
+            'job_number': t.job_number,
+            'description': t.description,
+            'setup_time': float(t.setup_time),
+            'time_each': float(t.time_each),
+            'predecessors': t.predecessors or '',
+            'resources': t.resources or '',
+            'completed': t.completed  # Ensure this is included
+        } for t in tasks]
         
+        # Fetch resources
         resources = Resource.query.all()
         resource_data = [{'name': r.name, 'type': r.type} for r in resources]
-
-        resource_groups = [{'name': g.name, 'resources': [r.name for r in g.resources]} for g in ResourceGroup.query.all()]
         
+        # Fetch resource groups (assuming a ResourceGroup model exists)
+        resource_groups = ResourceGroup.query.all()
+        resource_group_data = [{'group_name': rg.group_name, 'resources': rg.resources or ''} for rg in resource_groups]
+        
+        # Fetch calendar
         calendar = Calendar.query.all()
-        # Ensure start_time and end_time remain strings
         calendar_data = [{'weekday': c.weekday, 'start_time': str(c.start_time), 'end_time': str(c.end_time)} for c in calendar]
         
-        return jsonify({
+        # Combine all data into response
+        response_data = {
             'jobs': job_data,
             'tasks': task_data,
             'resources': resource_data,
-            'resource_groups': resource_groups,
+            'resource_groups': resource_group_data,  # Restore resource groups
             'calendar': calendar_data
-        })
+        }
+        
+        return jsonify(response_data)
     except Exception as e:
         logger.error(f"Error in /api/schedule_data: {str(e)}", exc_info=True)
         return jsonify({'error': f"Server error: {str(e)}"}), 500

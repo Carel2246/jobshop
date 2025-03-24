@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import requests
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time as dt_time
 from deap import base, creator, tools, algorithms
 import random
 import json
@@ -13,33 +13,28 @@ class SchedulerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Nigel Metal Scheduler")
-        self.root.geometry("600x400")  # Set window size
-        self.root.configure(bg="#1E1E1E")  # Dark background
+        self.root.geometry("600x400")
+        self.root.configure(bg="#1E1E1E")
 
-        # Style configuration for dark theme
         style = ttk.Style()
-        style.theme_use("clam")  # Use 'clam' theme for customizability
+        style.theme_use("clam")
         style.configure("TLabel", background="#1E1E1E", foreground="#FF8C00", font=("Courier", 12))
         style.configure("TButton", background="#FF8C00", foreground="#1E1E1E", font=("Courier", 12, "bold"),
                         borderwidth=0, padding=5)
         style.map("TButton", background=[("active", "#FFA500")], foreground=[("active", "#000000")])
         style.configure("TEntry", fieldbackground="#333333", foreground="#FF8C00", font=("Courier", 12))
 
-        # Main frame
         self.main_frame = ttk.Frame(root, padding=10)
         self.main_frame.pack(fill="both", expand=True)
 
-        # Start Date input
         ttk.Label(self.main_frame, text="Start Date:").pack(pady=5)
         self.start_date_entry = ttk.Entry(self.main_frame)
         self.start_date_entry.insert(0, datetime.now().strftime('%Y-%m-%dT%H:%M'))
         self.start_date_entry.pack(pady=5)
 
-        # Generate Schedule button
         self.generate_button = ttk.Button(self.main_frame, text="Generate Schedule", command=self.run_schedule)
         self.generate_button.pack(pady=10)
 
-        # Terminal output (green text on black)
         self.terminal = tk.Text(self.main_frame, height=10, bg="#003300", fg="#00FF00", font=("Courier", 10),
                                 borderwidth=0, relief="flat", wrap="word")
         self.terminal.pack(fill="both", expand=True, pady=10)
@@ -47,7 +42,6 @@ class SchedulerApp:
         self.terminal.config(state="disabled")
 
     def log_to_terminal(self, message):
-        """Add a message to the terminal with a timestamp."""
         self.terminal.config(state="normal")
         self.terminal.insert("end", f"[{datetime.now().strftime('%H:%M:%S')}] {message}\n")
         self.terminal.see("end")
@@ -59,8 +53,12 @@ class SchedulerApp:
         response = requests.get(f"{API_BASE_URL}/api/schedule_data")
         if response.status_code != 200:
             raise Exception(f"Failed to fetch data: {response.status_code} - {response.text}")
+        data = response.json()
+        self.log_to_terminal("Raw task data sample:")
+        for t in data['tasks'][:5]:  # Log first 5 tasks for debugging
+            self.log_to_terminal(f"Task {t['task_number']}: {t}")
         self.log_to_terminal("Data retrieved successfully.")
-        return response.json()
+        return data
 
     def save_schedule(self, result):
         self.log_to_terminal("Uploading schedule to the grid...")
@@ -86,6 +84,12 @@ class SchedulerApp:
                         resolved.append(res)
             task['resolved_resources'] = resolved
 
+    def is_task_completed(self, task):
+        completed = task.get('completed', False)
+        if isinstance(completed, str):
+            return completed.lower() in ('true', '1', 'yes')
+        return bool(completed)
+
     def adjust_to_working_hours(self, start_date, task_schedule, calendar):
         self.log_to_terminal("Adjusting timelines to operational hours...")
         calendar_map = {c.weekday: (c.start_time, c.end_time) for c in calendar}
@@ -97,7 +101,7 @@ class SchedulerApp:
 
             while remaining > 0:
                 weekday = current.weekday()
-                work_start, work_end = calendar_map.get(weekday, (time(0, 0), time(0, 0)))
+                work_start, work_end = calendar_map.get(weekday, (dt_time(0, 0), dt_time(0, 0)))
                 day_start = datetime.combine(current.date(), work_start)
                 day_end = datetime.combine(current.date(), work_end)
                 day_minutes = (day_end - day_start).total_seconds() / 60 if work_start != work_end else 0
@@ -145,8 +149,11 @@ class SchedulerApp:
             
             self.log_to_terminal("Processing job data...")
             jobs = data['jobs']
-            tasks = [t for t in data['tasks'] if not t.get('completed', False)]
+            tasks = [t for t in data['tasks'] if not self.is_task_completed(t)]
+            self.log_to_terminal(f"Filtered tasks: {len(tasks)} out of {len(data['tasks'])}")
+            
             resources = data['resources']
+            # Note: resource_groups are available in data['resource_groups'] but not used in scheduling yet
             calendar = []
             for c in data['calendar']:
                 try:
@@ -161,7 +168,6 @@ class SchedulerApp:
 
             self.resolve_resources(tasks, resources)
 
-            # DEAP setup
             creator.create("FitnessMin", base.Fitness, weights=(-1.0, -1.0))
             creator.create("Individual", list, fitness=creator.FitnessMin)
             
@@ -219,11 +225,10 @@ class SchedulerApp:
             for gen in range(40):
                 algorithms.eaSimple(pop, toolbox, cxpb=0.5, mutpb=0.2, ngen=1, verbose=False)
                 self.log_to_terminal(random.choice(maxis_messages))
-                time.sleep(0.1)  # Small delay for effect
+                time.sleep(0.1)
 
             best_ind = tools.selBest(pop, 1)[0]
 
-            # Build final schedule
             self.log_to_terminal("Constructing final schedule...")
             result = {'segments': []}
             resource_busy = {r['name']: [] for r in resources}
