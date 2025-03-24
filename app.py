@@ -1313,8 +1313,8 @@ def schedule_data():
             # Join with resource_group_association and resource to get associated resources
             associated_resources = (
                 db.session.query(Resource)
-                .join(resource_group_association, resource_group_association.resource_id == Resource.id)
-                .filter(resource_group_association.group_id == rg.id)
+                .join(resource_group_association, resource_group_association.c.resource_id == Resource.id)
+                .filter(resource_group_association.c.group_id == rg.id)
                 .all()
             )
             resource_names = [r.name for r in associated_resources]
