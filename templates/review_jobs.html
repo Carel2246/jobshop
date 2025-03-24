@@ -15,11 +15,7 @@
 
         function addTaskRow(data = {}) {
             const tbody = document.getElementById('tasks-body');
-            if (!tbody) {
-                console.error('tasks-body not found');
-                return;
-            }
-            console.log('addTaskRow called with:', data);
+            if (!tbody) return;
             const rowCount = tbody.getElementsByTagName('tr').length;
             const resources = (data.resources || '').split(',').map(r => r.trim());
             const machines = resources.filter(r => {% for g in machine_groups %}'{{ g.name }}' === r || {% endfor %}{% for r in machine_resources %}'{{ r.name }}' === r || {% endfor %}false).join(', ');
@@ -43,7 +39,7 @@
                         ${generateChecklist(rowCount, 'humans')}
                     </div>
                 </td>
-                <td><input type="checkbox" name="tasks[${rowCount}][completed]" ${data.completed ? 'checked' : ''}></td>
+                <td><input type="checkbox" name="tasks[${rowCount}][completed]" ${data.completed ? 'checked' : ''} onchange="toggleTaskCompleted(this, '${data.task_number || ''}')"></td>
                 <td>
                     <button type="button" class="delete-btn" onclick="deleteRow(this)" ${data.task_number ? '' : 'style="display: none;"'}>Delete</button>
                     <button type="button" class="cancel-btn" onclick="cancelRow(this)" ${data.task_number ? 'style="display: none;"' : ''}>Cancel</button>
@@ -58,13 +54,28 @@
             });
         }
 
+        async function toggleTaskCompleted(checkbox, taskNumber) {
+            if (!taskNumber) return;  // New tasks wait for form submission
+            const completed = checkbox.checked;
+            const response = await fetch(`/toggle_task_completed/${taskNumber}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ completed: completed })
+            });
+            const data = await response.json();
+            if (data.success) {
+                // Refresh job completion status
+                const jobNumber = document.getElementById('job_number').value;
+                window.location.reload();  // Simple refresh; could be optimized with AJAX
+            } else {
+                alert('Failed to update task completion');
+                checkbox.checked = !completed;  // Revert on failure
+            }
+        }
+
         function addMaterialRow(data = {}) {
             const tbody = document.getElementById('materials-body');
-            if (!tbody) {
-                console.error('materials-body not found');
-                return;
-            }
-            console.log('addMaterialRow called with:', data);
+            if (!tbody) return;
             const rowCount = tbody.getElementsByTagName('tr').length;
             const row = document.createElement('tr');
             row.innerHTML = `
@@ -81,26 +92,22 @@
 
         function generateChecklist(rowIndex, type) {
             let html = '';
-            try {
-                if (type === 'machines') {
-                    {% for group in machine_groups %}
-                        html += `<label><input type="checkbox" class="resource-checkbox" data-row="${rowIndex}" data-type="machines" value="{{ group.name }}" onchange="syncText(this)"> {{ group.name }}</label><br>`;
-                    {% endfor %}
-                    html += '<hr style="margin: 5px 0;">';
-                    {% for resource in machine_resources %}
-                        html += `<label><input type="checkbox" class="resource-checkbox" data-row="${rowIndex}" data-type="machines" value="{{ resource.name }}" onchange="syncText(this)"> {{ resource.name }}</label><br>`;
-                    {% endfor %}
-                } else if (type === 'humans') {
-                    {% for group in human_groups %}
-                        html += `<label><input type="checkbox" class="resource-checkbox" data-row="${rowIndex}" data-type="humans" value="{{ group.name }}" onchange="syncText(this)"> {{ group.name }}</label><br>`;
-                    {% endfor %}
-                    html += '<hr style="margin: 5px 0;">';
-                    {% for resource in human_resources %}
-                        html += `<label><input type="checkbox" class="resource-checkbox" data-row="${rowIndex}" data-type="humans" value="{{ resource.name }}" onchange="syncText(this)"> {{ resource.name }}</label><br>`;
-                    {% endfor %}
-                }
-            } catch (e) {
-                console.error('Error generating checklist:', e);
+            if (type === 'machines') {
+                {% for group in machine_groups %}
+                    html += `<label><input type="checkbox" class="resource-checkbox" data-row="${rowIndex}" data-type="machines" value="{{ group.name }}" onchange="syncText(this)"> {{ group.name }}</label><br>`;
+                {% endfor %}
+                html += '<hr style="margin: 5px 0;">';
+                {% for resource in machine_resources %}
+                    html += `<label><input type="checkbox" class="resource-checkbox" data-row="${rowIndex}" data-type="machines" value="{{ resource.name }}" onchange="syncText(this)"> {{ resource.name }}</label><br>`;
+                {% endfor %}
+            } else if (type === 'humans') {
+                {% for group in human_groups %}
+                    html += `<label><input type="checkbox" class="resource-checkbox" data-row="${rowIndex}" data-type="humans" value="{{ group.name }}" onchange="syncText(this)"> {{ group.name }}</label><br>`;
+                {% endfor %}
+                html += '<hr style="margin: 5px 0;">';
+                {% for resource in human_resources %}
+                    html += `<label><input type="checkbox" class="resource-checkbox" data-row="${rowIndex}" data-type="humans" value="{{ resource.name }}" onchange="syncText(this)"> {{ resource.name }}</label><br>`;
+                {% endfor %}
             }
             return html;
         }
@@ -116,10 +123,6 @@
         function syncText(checkbox) {
             const checklist = checkbox.closest('.resource-checklist');
             const input = checklist.previousElementSibling;
-            if (!input) {
-                console.error('Input not found for checkbox:', checkbox.value);
-                return;
-            }
             const type = checkbox.dataset.type;
             const checked = Array.from(checklist.querySelectorAll(`.resource-checkbox[data-type="${type}"]:checked`))
                 .map(cb => cb.value);
@@ -171,18 +174,10 @@
         });
     </script>
     <style>
-        .resource-checklist { 
-            z-index: 10; 
-            width: 10vw; 
-            max-height: 25vh; 
-            overflow-y: auto; 
-        }
+        .resource-checklist { z-index: 10; width: 10vw; max-height: 25vh; overflow-y: auto; }
         .delete-btn, .cancel-btn { margin: 0 5px; }
         .resource-cell { position: relative; }
-        .mermaid { 
-            margin-top: 20px; 
-            text-align: center; 
-        }
+        .mermaid { margin-top: 20px; text-align: center; }
     </style>
 </head>
 <body>
@@ -276,18 +271,17 @@
                             {% if task.predecessors %}
                                 {% for pred in task.predecessors.split(',') %}
                                     {% set trimmed_pred = pred|trim %}
-                                    {% if trimmed_pred in tasks|map(attribute='task_number') %}
+{% if trimmed_pred in tasks|map(attribute='task_number') %}
                                         {{ trimmed_pred }} --> {{ task.task_number }}
                                     {% endif %}
                                 {% endfor %}
-                            {% endif %}
-                        {% endfor %}
-                        classDef completed fill:#d4edda,stroke:#333;
-                    {% else %}
-                        graph LR
-                        A[No Tasks Available]
-                    {% endif %}
-                </div>
+                            {% endfor %}
+                            classDef completed fill:#d4edda,stroke:#333;
+                        {% else %}
+                            graph LR
+                            A[No Tasks Available]
+                        {% endif %}
+                    </div>
 
                 <br><button type="submit" name="update">Update Job</button>
             {% endif %}

@@ -2,7 +2,7 @@ from flask import Flask, request, render_template, redirect, url_for, jsonify, s
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta, time
 import random
-from deap import base, creator, tools, algorithms
+#from deap import base, creator, tools, algorithms
 import logging
 import pandas as pd
 from io import BytesIO
@@ -570,6 +570,10 @@ def delete_calendar(weekday):
     db.session.commit()
     return jsonify({"success": True})
 
+@app.route('/schedule', methods=['GET'])
+def schedule_form():
+    return render_template('schedule.html', default_date=datetime.now().strftime('%Y-%m-%dT%H:%M'))
+
 @app.route('/schedule', methods=['POST'])
 def schedule():
     start_date = datetime.strptime(request.form['start_date'], '%Y-%m-%dT%H:%M')
@@ -1130,10 +1134,7 @@ def validate_resources():
 @app.route('/review_jobs', methods=['GET', 'POST'])
 def review_jobs():
     include_completed = request.args.get('include_completed', 'false').lower() == 'true'
-    if include_completed:
-        jobs = Job.query.all()
-    else:
-        jobs = Job.query.filter_by(completed=False).all()
+    jobs = Job.query.all() if include_completed else Job.query.filter_by(completed=False).all()
 
     machine_resources = Resource.query.filter_by(type='M').all()
     human_resources = Resource.query.filter_by(type='H').all()
@@ -1144,18 +1145,14 @@ def review_jobs():
     tasks = []
     materials = []
 
-    # Handle job selection via POST or GET
     job_number = request.form.get('job_number') if request.method == 'POST' else request.args.get('job_number')
-    print(f"Method: {request.method}, Job number: {job_number}")
     if job_number:
         selected_job = Job.query.filter_by(job_number=job_number).first()
-        print(f"Selected job: {selected_job.job_number if selected_job else 'None'}")
         if selected_job:
             tasks = Task.query.filter_by(job_number=job_number).all()
             materials = Material.query.filter_by(job_number=job_number).all()
 
     if request.method == 'POST' and 'update' in request.form and selected_job:
-        # Update job fields
         selected_job.description = request.form.get('description', '')
         order_date_str = request.form.get('order_date')
         promised_date_str = request.form.get('promised_date')
@@ -1165,9 +1162,7 @@ def review_jobs():
         selected_job.price_each = float(request.form['price_each'])
         selected_job.customer = request.form.get('customer', '')
         selected_job.blocked = 'blocked' in request.form
-        selected_job.completed = 'completed' in request.form
 
-        # Parse tasks and materials from form
         tasks_data = {}
         materials_data = {}
         for key in request.form:
@@ -1184,7 +1179,6 @@ def review_jobs():
                     materials_data[index] = {}
                 materials_data[index][field] = request.form[key]
 
-        # Update or add tasks
         existing_tasks = {task.task_number: task for task in tasks}
         valid_resources = {r.name for r in Resource.query.all()}
         valid_groups = {g.name for g in ResourceGroup.query.all()}
@@ -1200,12 +1194,11 @@ def review_jobs():
             invalid = [r.strip() for r in resources.split(',') if r.strip() and r.strip() not in all_valid]
             if invalid:
                 return render_template('review_jobs.html', jobs=jobs, selected_job=selected_job, tasks=tasks, materials=materials,
-                                     include_completed=include_completed, machine_resources=machine_resources, human_resources=human_resources,
-                                     machine_groups=machine_groups, human_groups=human_groups,
-                                     error=f"Invalid resources in task {task_info['task_number']}: {', '.join(invalid)}")
+                                       include_completed=include_completed, machine_resources=machine_resources, human_resources=human_resources,
+                                       machine_groups=machine_groups, human_groups=human_groups,
+                                       error=f"Invalid resources in task {task_info['task_number']}: {', '.join(invalid)}")
             task_number = task_info['task_number']
             if task_number in existing_tasks:
-                # Update existing task
                 task = existing_tasks[task_number]
                 task.description = task_info.get('description', '')
                 task.setup_time = float(task_info['setup_time'])
@@ -1214,7 +1207,6 @@ def review_jobs():
                 task.resources = resources
                 task.completed = 'completed' in task_info
             else:
-                # Add new task
                 task = Task(
                     task_number=task_number,
                     job_number=job_number,
@@ -1227,7 +1219,6 @@ def review_jobs():
                 )
                 db.session.add(task)
 
-        # Update materials
         Material.query.filter_by(job_number=job_number).delete()
         for index, material_info in materials_data.items():
             material = Material(
@@ -1239,6 +1230,7 @@ def review_jobs():
             db.session.add(material)
 
         db.session.commit()
+        update_job_completion(job_number)  # Check completion after every update
         return redirect(url_for('review_jobs', include_completed=include_completed, job_number=job_number))
 
     return render_template('review_jobs.html', jobs=jobs, selected_job=selected_job, tasks=tasks, materials=materials,
