@@ -1363,6 +1363,8 @@ def schedule_data():
         
         resources = Resource.query.all()
         resource_data = [{'name': r.name, 'type': r.type} for r in resources]
+
+        resource_groups = [{'name': g.name, 'resources': [r.name for r in g.resources]} for g in ResourceGroup.query.all()]
         
         calendar = Calendar.query.all()
         # Ensure start_time and end_time remain strings
@@ -1372,6 +1374,7 @@ def schedule_data():
             'jobs': job_data,
             'tasks': task_data,
             'resources': resource_data,
+            'resource_groups': resource_groups,
             'calendar': calendar_data
         })
     except Exception as e:
