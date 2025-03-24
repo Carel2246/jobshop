@@ -57,6 +57,9 @@ class SchedulerApp:
         self.log_to_terminal("Raw task data sample:")
         for t in data['tasks'][:5]:
             self.log_to_terminal(f"Task {t['task_number']}: {t}")
+        self.log_to_terminal("Resource groups data:")
+        for rg in data['resource_groups'][:5]:
+            self.log_to_terminal(f"Group {rg['group_name']}: {rg['resources']}")
         self.log_to_terminal("Data retrieved successfully.")
         return data
 
@@ -151,7 +154,14 @@ class SchedulerApp:
             self.log_to_terminal("Processing job data...")
             jobs = data['jobs']
             tasks = [t for t in data['tasks'] if not self.is_task_completed(t)]
-            self.log_to_terminal(f"Filtered tasks: {len(tasks)} out of {len(data['tasks'])}")
+            self.log_to_terminal(f"Filtered tasks: {len(tasks)} out of {len(data['tasks'])} (excluding completed tasks)")
+            
+            # Log job numbers to confirm no blocked jobs are included
+            job_numbers = [j['job_number'] for j in jobs]
+            self.log_to_terminal(f"Job numbers in schedule: {job_numbers}")
+            
+            # Create a mapping of job_number to quantity
+            job_quantity_map = {j['job_number']: j['quantity'] for j in jobs}
             
             resources = data['resources']
             resource_groups = data['resource_groups']
@@ -166,7 +176,7 @@ class SchedulerApp:
                     end_time = datetime.strptime(c['end_time'], '%H:%M').time()
                 except ValueError:
                     end_time = datetime.strptime(c['end_time'], '%H:%M:%S').time()
-                calendar.append(type('Calendar', (), {'weekday': c['weekday'], 'start_time': start_time, 'end_time': end_time}))
+                calendar.append(type('Calendar', (), {'weekday': c.weekday, 'start_time': start_time, 'end_time': end_time}))
 
             self.resolve_resources(tasks, resources, resource_groups)
 
@@ -185,7 +195,9 @@ class SchedulerApp:
 
                 for idx in individual:
                     task = tasks[idx]
-                    duration = task['setup_time'] + task['time_each']
+                    # Calculate duration: setup_time + (job_quantity * time_each)
+                    job_quantity = job_quantity_map.get(task['job_number'], 1)  # Default to 1 if not found
+                    duration = task['setup_time'] + (job_quantity * task['time_each'])
                     required_res = task['resolved_resources']
 
                     earliest_start = start_date if not task_times else max(t[1] for t in task_times.values())
@@ -225,7 +237,7 @@ class SchedulerApp:
                     task_times[idx] = (start_time, end_time)
 
                 adjusted_schedule = self.adjust_to_working_hours(start_date, 
-                                                                {idx: (task['setup_time'] + task['time_each'], resolved_resources) 
+                                                                {idx: (task['setup_time'] + (job_quantity_map.get(tasks[idx]['job_number'], 1) * tasks[idx]['time_each']), resolved_resources) 
                                                                  for idx, resolved_resources in enumerate([t['resolved_resources'] for t in tasks])}, 
                                                                 calendar)
                 total_time = max((t['end'] - start_date).total_seconds() for t in adjusted_schedule.values()) if adjusted_schedule else 0
@@ -252,7 +264,9 @@ class SchedulerApp:
 
             for idx in best_ind:
                 task = tasks[idx]
-                duration = task['setup_time'] + task['time_each']
+                # Calculate duration: setup_time + (job_quantity * time_each)
+                job_quantity = job_quantity_map.get(task['job_number'], 1)
+                duration = task['setup_time'] + (job_quantity * task['time_each'])
                 required_res = task['resolved_resources']
 
                 earliest_start = start_date if not task_schedule else max(t[1] for t in task_schedule.values())

@@ -1285,12 +1285,16 @@ def toggle_job_blocked(job_number):
 @app.route('/api/schedule_data', methods=['GET'])
 def schedule_data():
     try:
-        # Fetch jobs (only incomplete ones)
-        jobs = Job.query.filter_by(completed=False).all()
+        # Fetch jobs (only incomplete and non-blocked ones)
+        jobs = Job.query.filter_by(completed=False, blocked=False).all()
         job_data = [{'job_number': j.job_number, 'description': j.description, 'quantity': j.quantity} for j in jobs]
+        logger.info(f"Fetched {len(job_data)} jobs (incomplete and non-blocked)")
         
-        # Fetch all tasks, including completed field
-        tasks = Task.query.all()
+        # Get job numbers of non-blocked jobs
+        valid_job_numbers = [j.job_number for j in jobs]
+        
+        # Fetch tasks, only for non-blocked jobs
+        tasks = Task.query.filter(Task.job_number.in_(valid_job_numbers)).all()
         task_data = [{
             'task_number': t.task_number,
             'job_number': t.job_number,
@@ -1301,31 +1305,32 @@ def schedule_data():
             'resources': t.resources or '',
             'completed': bool(t.completed)
         } for t in tasks]
+        logger.info(f"Fetched {len(task_data)} tasks for non-blocked jobs")
         
         # Fetch resources
         resources = Resource.query.all()
         resource_data = [{'name': r.name, 'type': r.type} for r in resources]
+        logger.info(f"Fetched {len(resource_data)} resources")
         
         # Fetch resource groups and their associated resources
         resource_groups = ResourceGroup.query.all()
+        logger.info(f"Fetched {len(resource_groups)} resource groups")
         resource_group_data = []
         for rg in resource_groups:
-            # Join with resource_group_association and resource to get associated resources
-            associated_resources = (
-                db.session.query(Resource)
-                .join(resource_group_association, resource_group_association.c.resource_id == Resource.id)
-                .filter(resource_group_association.c.group_id == rg.id)
-                .all()
-            )
+            associations = db.session.query(resource_group_association).filter_by(group_id=rg.id).all()
+            resource_ids = [assoc.resource_id for assoc in associations]
+            associated_resources = Resource.query.filter(Resource.id.in_(resource_ids)).all()
             resource_names = [r.name for r in associated_resources]
+            logger.info(f"Resource group {rg.name} has resources: {resource_names}")
             resource_group_data.append({
-                'group_name': rg.name,  # Changed from rg.group_name to rg.name
+                'group_name': rg.name,
                 'resources': resource_names
             })
         
         # Fetch calendar
         calendar = Calendar.query.all()
         calendar_data = [{'weekday': c.weekday, 'start_time': str(c.start_time), 'end_time': str(c.end_time)} for c in calendar]
+        logger.info(f"Fetched {len(calendar_data)} calendar entries")
         
         # Combine all data into response
         response_data = {
@@ -1336,6 +1341,7 @@ def schedule_data():
             'calendar': calendar_data
         }
         
+        logger.info("Successfully generated schedule data response")
         return jsonify(response_data)
     except Exception as e:
         logger.error(f"Error in /api/schedule_data: {str(e)}", exc_info=True)
