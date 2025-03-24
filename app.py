@@ -1349,5 +1349,42 @@ def toggle_job_blocked(job_number):
     db.session.commit()
     return jsonify({"success": True})
 
+# API Endpoints
+
+@app.route('/api/schedule_data', methods=['GET'])
+def schedule_data():
+    # Add authentication (e.g., API token check) here
+    jobs = Job.query.filter_by(completed=False).all()
+    job_data = [{'job_number': j.job_number, 'description': j.description, 'quantity': j.quantity} for j in jobs]
+    tasks = Task.query.all()
+    task_data = [{'task_number': t.task_number, 'job_number': t.job_number, 'description': t.description,
+                  'setup_time': t.setup_time, 'time_each': t.time_each, 'predecessors': t.predecessors,
+                  'machines': t.machines, 'humans': t.humans} for t in tasks]
+    resources = Resource.query.all()
+    resource_data = [{'name': r.name, 'type': r.type} for r in resources]
+    calendar = Calendar.query.all()
+    calendar_data = [{'weekday': c.weekday, 'start_time': c.start_time, 'end_time': c.end_time} for c in calendar]
+    return jsonify({
+        'jobs': job_data,
+        'tasks': task_data,
+        'resources': resource_data,
+        'calendar': calendar_data
+    })
+
+@app.route('/api/save_schedule', methods=['POST'])
+def api_save_schedule():
+    # Add authentication here
+    data = request.get_json()
+    db.session.query(Schedule).delete()
+    for seg in data['segments']:
+        db.session.add(Schedule(
+            task_number=seg['task_id'],
+            start_time=datetime.fromisoformat(seg['start']),
+            end_time=datetime.fromisoformat(seg['end']),
+            resources_used=f"{seg['machines']}, {seg['people']}"
+        ))
+    db.session.commit()
+    return jsonify({'success': True})
+
 if __name__ == '__main__':
     app.run(debug=os.getenv('FLASK_DEBUG', 'False') == 'True')
