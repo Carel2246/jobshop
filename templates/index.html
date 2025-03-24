@@ -4,14 +4,11 @@
     <title>Nigel Metal Scheduler</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
-    <script src="{{ url_for('static', filename='scheduler.js') }}"></script>
 </head>
 <body>
     <div class="container">
         <h1>Nigel Metal Scheduler</h1>
-        <p>Welcome to the alpha release of our scheduling app - 2025-03-24 21:07</p>
-        <div id="scheduling-message" style="color: orange; display: none;">Scheduling is currently in progress...</div>
+        <p>Welcome to the alpha release of our scheduling app - 2025-03-24 21:56</p>
 
         <h2>Setup</h2>
         <p>
@@ -33,15 +30,9 @@
         <p>
             <a href="{{ url_for('view_schedule') }}">View List Schedule</a> | 
             <a href="{{ url_for('production_schedule') }}">View Production Schedule</a> | 
-            <a href="{{ url_for('gantt') }}">View Gantt Chart</a> |
-            <br> </br>
-            <form id="schedule-form">
-                <label for="start_date">Scheduling Start Date:</label>
-                <input type="datetime-local" id="start_date" name="start_date" value="{{ default_date }}" required>
-                <button type="submit">Generate Schedule</button>
-            </form>
-            <div id="schedule-result"></div>
+            <a href="{{ url_for('gantt') }}">View Gantt Chart</a>
         </p>
+        <p>Use the standalone scheduler app to generate a new schedule.</p>
 
         <h2>Reporting</h2>
         <p>
@@ -53,24 +44,5 @@
             <p style="color: red;">{{ error }}</p>
         {% endif %}
     </div>
-    <script>
-        document.getElementById('schedule-form').addEventListener('submit', async function(event) {
-            event.preventDefault();
-            const resultDiv = document.getElementById('schedule-result');
-            resultDiv.innerHTML = '<p>Scheduling in Progress... (This may take a few minutes)</p>';
-
-            await runScheduler(this, (error, success) => {
-                if (error) {
-                    resultDiv.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
-                } else {
-                    alert(success);
-                    resultDiv.innerHTML = '<p style="color: green;">' + success + '</p>';
-                }
-            });
-        });
-
-        document.addEventListener('DOMContentLoaded', updateSchedulingMessage);
-        window.addEventListener('storage', updateSchedulingMessage);
-    </script>
 </body>
 </html>

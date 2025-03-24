@@ -2,29 +2,17 @@
 <html>
 <head>
     <title>Schedule</title>
-    <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
-    <script src="{{ url_for('static', filename='scheduler.js') }}"></script>
-    <style>
-        #loading { display: none; }
-        #schedule-result { margin-top: 20px; }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
 </head>
 <body>
     <div class="container">
         <h1>Schedule</h1>
-        <div id="scheduling-message" style="color: orange; display: none;">Scheduling is currently in progress...</div>
         <button onclick="window.location.href='{{ url_for('index') }}'">Home</button>
         <button onclick="window.location.href='{{ url_for('review_jobs') }}'">Review Jobs</button>
         <button onclick="window.location.href='{{ url_for('production_schedule') }}'">Production Schedule</button>
 
-        <h2>Generate New Schedule</h2>
-        <form id="schedule-form">
-            <label for="start_date">Start Date:</label>
-            <input type="datetime-local" id="start_date" name="start_date" value="{{ default_date }}">
-            <button type="submit">Run Schedule Locally</button>
-        </form>
-        <div id="loading">Scheduling in Progress... (This may take a few minutes)</div>
-        <div id="schedule-result"></div>
+        <p>Use the standalone scheduler app to generate a new schedule.</p>
 
         {% if segments is defined %}
             <h2>Current Schedule</h2>
@@ -60,28 +48,5 @@
             {% endif %}
         {% endif %}
     </div>
-
-    <script>
-        document.getElementById('schedule-form').addEventListener('submit', async function(event) {
-            event.preventDefault();
-            const loading = document.getElementById('loading');
-            const resultDiv = document.getElementById('schedule-result');
-            loading.style.display = 'block';
-            resultDiv.innerHTML = '';
-
-            await runScheduler(this, (error, success) => {
-                loading.style.display = 'none';
-                if (error) {
-                    resultDiv.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
-                } else {
-                    alert(success);
-                    resultDiv.innerHTML = '<p style="color: green;">' + success + ' Reload or check other pages.</p>';
-                }
-            });
-        });
-
-        document.addEventListener('DOMContentLoaded', updateSchedulingMessage);
-        window.addEventListener('storage', updateSchedulingMessage);
-    </script>
 </body>
 </html>
