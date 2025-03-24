@@ -1365,7 +1365,8 @@ def schedule_data():
         resource_data = [{'name': r.name, 'type': r.type} for r in resources]
         
         calendar = Calendar.query.all()
-        calendar_data = [{'weekday': c.weekday, 'start_time': c.start_time, 'end_time': c.end_time} for c in calendar]
+        # Ensure start_time and end_time remain strings
+        calendar_data = [{'weekday': c.weekday, 'start_time': str(c.start_time), 'end_time': str(c.end_time)} for c in calendar]
         
         return jsonify({
             'jobs': job_data,
