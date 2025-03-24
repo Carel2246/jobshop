@@ -4,11 +4,13 @@
     <title>Nigel Metal Scheduler</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
+    <script src="{{ url_for('static', filename='scheduler.js') }}"></script>
 </head>
 <body>
     <div class="container">
         <h1>Nigel Metal Scheduler</h1>
-        <p>Welcome to the alpha release of our scheduling app - 2025-03-24 16:29</p>
+        <p>Welcome to the alpha release of our scheduling app - 2025-03-24 12:57</p>
         <div id="scheduling-message" style="color: orange; display: none;">Scheduling is currently in progress...</div>
 
         <h2>Setup</h2>
@@ -33,11 +35,12 @@
             <a href="{{ url_for('production_schedule') }}">View Production Schedule</a> | 
             <a href="{{ url_for('gantt') }}">View Gantt Chart</a> |
             <br> </br>
-            <form action="/schedule" method="POST">
+            <form id="schedule-form">
                 <label for="start_date">Scheduling Start Date:</label>
                 <input type="datetime-local" id="start_date" name="start_date" value="{{ default_date }}" required>
                 <button type="submit">Generate Schedule</button>
             </form>
+            <div id="schedule-result"></div>
         </p>
 
         <h2>Reporting</h2>
@@ -51,16 +54,22 @@
         {% endif %}
     </div>
     <script>
-        function updateSchedulingMessage() {
-            const message = document.getElementById('scheduling-message');
-            if (sessionStorage.getItem('schedulingInProgress') === 'true') {
-                message.style.display = 'block';
-            } else {
-                message.style.display = 'none';
-            }
-        }
+        document.getElementById('schedule-form').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            const resultDiv = document.getElementById('schedule-result');
+            resultDiv.innerHTML = '<p>Scheduling in Progress... (This may take a few minutes)</p>';
+
+            await runScheduler(this, (error, success) => {
+                if (error) {
+                    resultDiv.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+                } else {
+                    alert(success);
+                    resultDiv.innerHTML = '<p style="color: green;">' + success + '</p>';
+                }
+            });
+        });
+
         document.addEventListener('DOMContentLoaded', updateSchedulingMessage);
-        // Update message on navigation or refresh
         window.addEventListener('storage', updateSchedulingMessage);
     </script>
 </body>

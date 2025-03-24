@@ -3,6 +3,7 @@
 <head>
     <title>Schedule</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
+    <script src="{{ url_for('static', filename='scheduler.js') }}"></script>
     <style>
         #loading { display: none; }
         #schedule-result { margin-top: 20px; }
@@ -61,246 +62,24 @@
     </div>
 
     <script>
-        async function runScheduler(event) {
+        document.getElementById('schedule-form').addEventListener('submit', async function(event) {
             event.preventDefault();
             const loading = document.getElementById('loading');
             const resultDiv = document.getElementById('schedule-result');
             loading.style.display = 'block';
             resultDiv.innerHTML = '';
-            sessionStorage.setItem('schedulingInProgress', 'true');
 
-            try {
-                const formData = new FormData(document.getElementById('schedule-form'));
-                const response = await fetch('/schedule', {
-                    method: 'POST',
-                    body: formData
-                });
-                if (!response.ok) throw new Error(`Server error: ${response.status}`);
-                const data = await response.json();
-                if (data.error) throw new Error(data.error);
-
-                let pyodide = await loadPyodide();
-                console.log('Pyodide loaded');
-                try {
-                    await pyodide.loadPackage('deap');
-                    console.log('DEAP loaded');
-                } catch (e) {
-                    throw new Error('Failed to load DEAP: ' + e.message);
-                }
-
-                pyodide.globals.set('start_date', data.start_date);
-                pyodide.globals.set('jobs', data.jobs);
-                pyodide.globals.set('tasks', data.tasks);
-                pyodide.globals.set('resources', data.resources);
-                pyodide.globals.set('calendar', data.calendar);
-
-                await pyodide.runPythonAsync(`
-                    from deap import base, creator, tools, algorithms
-                    import random
-                    from datetime import datetime, timedelta
-                    import json
-
-                    start_date = datetime.fromisoformat(start_date)
-                    jobs = [dict(j) for j in jobs]
-                    tasks = [dict(t) for t in tasks]
-                    resources = [dict(r) for r in resources]
-                    calendar = {c['weekday']: (
-                        datetime.strptime(c['start_time'], '%H:%M').time(),
-                        datetime.strptime(c['end_time'], '%H:%M').time()
-                    ) for c in calendar}
-
-                    def generate_schedule(task_order, tasks, start_date):
-                        resource_busy = {res['name']: [] for res in resources}
-                        task_times = {}
-                        remaining_tasks = set(t['task_number'] for t in tasks if not t['completed'])
-
-                        while remaining_tasks:
-                            scheduled = False
-                            for task in task_order:
-                                if task['task_number'] not in remaining_tasks:
-                                    continue
-                                preds_done = all(
-                                    p in task_times or next((t['completed'] for t in tasks if t['task_number'] == p), False)
-                                    for p in task['predecessors']
-                                )
-                                if not preds_done:
-                                    continue
-
-                                earliest_start_minutes = 0
-                                if task['predecessors']:
-                                    pred_end_times = [task_times[p][1] for p in task['predecessors'] if p in task_times]
-                                    earliest_start_minutes = max(pred_end_times) if pred_end_times else 0
-
-                                job = next(j for j in jobs if j['job_number'] == task['job_number'])
-                                duration = task['setup_time'] + (task['time_each'] * job['quantity'])
-                                required_res = task['resources']
-
-                                latest_busy = earliest_start_minutes
-                                for res_name in required_res:
-                                    busy_times = resource_busy[res_name]
-                                    for start, end in sorted(busy_times):
-                                        if start <= latest_busy < end:
-                                            latest_busy = end
-                                        elif start > latest_busy:
-                                            if start - latest_busy >= duration:
-                                                break
-                                            latest_busy = end
-
-                                start_minutes = latest_busy
-                                end_minutes = start_minutes + duration
-
-                                task_times[task['task_number']] = (start_minutes, end_minutes)
-                                for res_name in required_res:
-                                    resource_busy[res_name].append((start_minutes, end_minutes))
-                                remaining_tasks.remove(task['task_number'])
-                                scheduled = True
-
-                            if not scheduled and remaining_tasks:
-                                print("Deadlock detected")
-                                break
-                        return task_times
-
-                    def adjust_to_working_hours(start_date, task_times):
-                        adjusted_times = {}
-                        for task_num, (start_min, end_min) in task_times.items():
-                            start_dt = start_date
-                            remaining_start = start_min
-                            remaining_end = end_min
-
-                            while remaining_start > 0 or remaining_end > 0:
-                                weekday = start_dt.weekday()
-                                work_start, work_end = calendar.get(weekday, (time(0, 0), time(0, 0)))
-                                day_start = datetime.combine(start_dt.date(), work_start)
-                                day_end = datetime.combine(start_dt.date(), work_end)
-                                day_minutes = (day_end - day_start).total_seconds() / 60 if work_start != work_end else 0
-
-                                if day_minutes == 0:
-                                    start_dt = start_dt.replace(hour=0, minute=0) + timedelta(days=1)
-                                    continue
-
-                                if start_dt < day_start:
-                                    start_dt = day_start
-
-                                minutes_until_day_end = (day_end - start_dt).total_seconds() / 60
-                                if remaining_start > 0:
-                                    if minutes_until_day_end >= remaining_start:
-                                        start_dt += timedelta(minutes=remaining_start)
-                                        remaining_start = 0
-                                    else:
-                                        remaining_start -= minutes_until_day_end
-                                        start_dt = day_start + timedelta(days=1)
-                                    continue
-
-                                if remaining_end > 0:
-                                    if minutes_until_day_end >= remaining_end:
-                                        end_dt = start_dt + timedelta(minutes=remaining_end)
-                                        remaining_end = 0
-                                    else:
-                                        remaining_end -= minutes_until_day_end
-                                        start_dt = day_start + timedelta(days=1)
-                                    continue
-
-                            adjusted_times[task_num] = (start_dt.isoformat(), end_dt.isoformat())
-                        return adjusted_times
-
-                    def evaluate(individual, tasks, start_date, jobs):
-                        task_order = [tasks[i] for i in individual if not tasks[i]['completed']]
-                        task_times = generate_schedule(task_order, tasks, start_date)
-                        adjusted_times = adjust_to_working_hours(start_date, task_times)
-                        total_rand_days_late = 0
-                        for job in jobs:
-                            job_tasks = [t for t in tasks if t['job_number'] == job['job_number']]
-                            if all(t['task_number'] in adjusted_times or t['completed'] for t in job_tasks):
-                                end_time = max(
-                                    datetime.fromisoformat(adjusted_times[t['task_number']][1])
-                                    for t in job_tasks if t['task_number'] in adjusted_times
-                                ) if any(t['task_number'] in adjusted_times for t in job_tasks) else start_date
-                                promised = datetime.fromisoformat(job['promised_date']) if job['promised_date'] else None
-                                days_late = max(0, (end_time - promised).total_seconds() / 86400) if promised else 0
-                                total_rand_days_late += days_late * job['price_each'] * job['quantity']
-                        return (total_rand_days_late,)
-
-                    creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
-                    creator.create("Individual", list, fitness=creator.FitnessMin)
-                    toolbox = base.Toolbox()
-                    toolbox.register("indices", random.sample, range(len(tasks)), len(tasks))
-                    toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.indices)
-                    toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-                    toolbox.register("mate", tools.cxOrdered)
-                    toolbox.register("mutate", tools.mutShuffleIndexes, indpb=0.05)
-                    toolbox.register("select", tools.selTournament, tournsize=3)
-                    toolbox.register("evaluate", evaluate, tasks=tasks, start_date=start_date, jobs=jobs)
-
-                    population = toolbox.population(n=50)
-                    hof = tools.HallOfFame(1)
-                    algorithms.eaSimple(population, toolbox, cxpb=0.7, mutpb=0.2, ngen=100, halloffame=hof, verbose=False)
-                    best_individual = hof[0]
-
-                    task_order = [tasks[i] for i in best_individual]
-                    task_times = generate_schedule(task_order, tasks, start_date)
-                    adjusted_times = adjust_to_working_hours(start_date, task_times)
-                    total_rand_days_late = evaluate(best_individual, tasks, start_date, jobs)[0]
-
-                    segments = []
-                    resource_dict = {r['name']: r['type'] for r in resources}
-                    for task in tasks:
-                        if task['task_number'] in adjusted_times:
-                            start, end = adjusted_times[task['task_number']]
-                            machines = ', '.join(r for r in task['resources'] if resource_dict.get(r) == 'M')
-                            people = ', '.join(r for r in task['resources'] if resource_dict.get(r) == 'H')
-                            job = next((j for j in jobs if j['job_number'] == task['job_number']), None)
-                            segments.append({
-                                'task_id': task['task_number'],
-                                'job_id': task['job_number'],
-                                'job_description': job['description'] if job else '',
-                                'job_quantity': job['quantity'] if job else 0,
-                                'description': task.get('description', ''),
-                                'machines': machines,
-                                'people': people,
-                                'start': start,
-                                'end': end
-                            })
-
-                    result = {
-                        'segments': segments,
-                        'total_rand_days_late': total_rand_days_late
-                    }
-                `);
-
-                const result = pyodide.globals.get('result').toJs();
+            await runScheduler(this, (error, success) => {
                 loading.style.display = 'none';
-
-                const saveResponse = await fetch('/save_schedule', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(result)
-                });
-                const saveData = await saveResponse.json();
-                if (saveData.success) {
-                    sessionStorage.removeItem('schedulingInProgress');
-                    alert('Scheduling completed successfully!');
-                    resultDiv.innerHTML = '<p style="color: green;">Schedule generated and saved. Reload or check other pages.</p>';
+                if (error) {
+                    resultDiv.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
                 } else {
-                    throw new Error('Failed to save schedule');
+                    alert(success);
+                    resultDiv.innerHTML = '<p style="color: green;">' + success + ' Reload or check other pages.</p>';
                 }
-            } catch (error) {
-                console.error('Scheduling error:', error);
-                loading.style.display = 'none';
-                sessionStorage.removeItem('schedulingInProgress');
-                resultDiv.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
-            }
-        }
+            });
+        });
 
-        document.getElementById('schedule-form').addEventListener('submit', runScheduler);
-
-        function updateSchedulingMessage() {
-            const message = document.getElementById('scheduling-message');
-            if (sessionStorage.getItem('schedulingInProgress') === 'true') {
-                message.style.display = 'block';
-            } else {
-                message.style.display = 'none';
-            }
-        }
         document.addEventListener('DOMContentLoaded', updateSchedulingMessage);
         window.addEventListener('storage', updateSchedulingMessage);
     </script>
